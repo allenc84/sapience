@@ -143,6 +143,11 @@ def search(
         results["distances"][0],
         results["ids"][0],
     ):
+        # A deleted record can linger in the HNSW index (e.g. deletes issued from
+        # another process) and come back with None doc/metadata — skip it rather
+        # than crash the whole search.
+        if doc is None or meta is None:
+            continue
         score = 1.0 - dist   # cosine distance → similarity
         mem = _metadata_to_memory(doc, meta, mid)
         if mem.salience >= min_salience:
