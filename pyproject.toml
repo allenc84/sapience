@@ -26,7 +26,7 @@ dependencies = [
 sapience = "sapience.server:cli"
 
 [project.urls]
-Homepage = "https://github.com/allenc84/claude-memory"
+Homepage = "https://github.com/allenc84/sapience"
 
 [tool.setuptools]
 packages = ["sapience"]

@@ -45,7 +45,7 @@ Your data is stored **locally** (vector DB + SQLite on your machine; no hosted a
 Requires Python 3.12+.
 
 ```bash
-git clone https://github.com/allenc84/claude-memory.git sapience
+git clone https://github.com/allenc84/sapience.git
 cd sapience
 python3.12 -m venv venv
 ./venv/bin/pip install -e .
