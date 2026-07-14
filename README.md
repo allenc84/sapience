@@ -1,93 +1,112 @@
-# claude-memory
+# Sapience
 
-A persistent, semantic memory system for [Claude Code](https://claude.com/claude-code), exposed as an [MCP](https://modelcontextprotocol.io) server. Instead of re-reading flat markdown files each session, Claude searches a vector database by meaning — surfacing prior decisions, evolved thinking, and relevant context automatically.
+**Human-like memory and a judgment ledger for AI** — an [MCP](https://modelcontextprotocol.io) server for [Claude Code](https://claude.com/claude-code).
 
-It also includes a **judgment ledger**: log predictions and assessments, resolve them later against reality, and generate calibration patterns and bias maps so the assistant learns where your judgment is systematically off.
+An LLM has *intelligence* — it processes and analyzes brilliantly — but it's amnesiac between sessions and never accumulates *your* experience. Humans win on something else: memory that persists and judgment that gets sharper because we keep track of how our past calls turned out. That faculty — the one that makes *Homo sapiens* more than raw brainpower — is what Sapience adds to your AI.
 
-## How it works
+Two halves:
 
-- **Storage** — [ChromaDB](https://www.trychroma.com/) vector store on disk (`./chroma_db`).
+- **A human-like memory** — episodic and semantic memories, ranked by importance, consolidated over time into durable patterns. Not RAG over a scratch file.
+- **A judgment ledger** — log a prediction with a probability, resolve it against what actually happened, and get a real calibration read (Brier score, reliability by confidence band, a bias map) so you can see where your judgment is systematically off.
+
+> Sapience gives *one user's* AI a compounding memory + judgment loop. It is not a claim to reproduce human cognition — it's the missing feedback loop that lets an intelligence learn from experience.
+
+## The judgment ledger
+
+This is the part you won't find in other memory tools. Every "AI memory" remembers what you said; Sapience keeps score of whether you were *right*.
+
+1. **Log** a forward-looking call with a probability (0–1) and — crucially — the *reasoning and conditions as they were at the time*. Most retrospectives rewrite history; this preserves the contemporaneous evidence.
+2. **Resolve** it when the outcome is known (right / partial / wrong).
+3. **Calibrate.** Sapience computes a **Brier score** against a base-rate baseline, breaks accuracy down by confidence band, and flags over/under-confidence. A Claude-written narrative sits *on top of* the numbers — never instead of them.
+
+**Honesty by design:** below a sample threshold (20 resolved by default), Sapience refuses to call anything a "bias" and explicitly labels its output *"reflection, not statistics."* A bias is not a bias at n=3.
+
+## How the memory works
+
+- **Storage** — a local [ChromaDB](https://www.trychroma.com/) vector store; the ledger is local SQLite. No third-party SaaS account.
 - **Embeddings** — OpenAI (`text-embedding-3` family) for semantic similarity.
 - **Synthesis** — Anthropic Claude for context briefs, consolidation, calibration, and bias maps.
-- **Retrieval** — memories are ranked by relevance × salience, so important context surfaces first.
+- **Retrieval** — candidates are over-fetched by similarity, then reranked by `similarity × salience`, so an important-but-slightly-less-similar memory can still surface.
 
-Memories are typed: `episodic` (events/decisions), `semantic` (extracted patterns, usually written by consolidation), `user` (facts about you), `feedback` (how to work with you), `project` (ongoing initiatives), `reference` (pointers to external systems).
+Memory types: `episodic` (events/decisions), `semantic` (patterns, written by consolidation), `user` (facts about you), `feedback` (how to work with you), `project` (initiatives), `reference` (external pointers).
+
+### Privacy — read this precisely
+
+Your data is stored **locally** (vector DB + SQLite on your machine; no hosted account). But Sapience is **not** fully local compute: memory **content is sent to OpenAI** to create embeddings, and **selected memories are sent to Anthropic** for briefs, consolidation, and calibration. If that tradeoff doesn't work for your data, don't point Sapience at it.
 
 ## Tools
 
-**Memory**
-- `search_memory` — semantic search over all memories
-- `save_memory` — persist a decision, insight, or piece of context
-- `get_context_brief` — Claude-synthesized brief on a topic (what's known, how thinking evolved, what to challenge)
-- `get_related` — memories related to a given one
-- `consolidate` — extract durable semantic patterns from recent episodes
-- `list_memories`, `memory_stats` — inspect the store
+**Memory** — `search_memory`, `save_memory`, `get_context_brief`, `get_related`, `consolidate`, `list_memories`, `memory_stats`
 
-**Judgment ledger**
-- `log_assessment` — record a prediction with confidence, horizon, and reasoning
-- `list_pending_assessments` — assessments awaiting resolution
-- `resolve_assessment` — score what actually happened (right / partial / wrong)
-- `generate_calibration` — extract a calibration pattern for a domain (needs 3+ resolved)
-- `get_bias_map` — cross-domain map of where judgment is strong vs. poor
+**Judgment ledger** — `log_assessment` (prefer a numeric `probability`), `list_pending_assessments`, `resolve_assessment`, `generate_calibration` (Brier + reliability, gated for sufficiency), `get_bias_map`
 
 ## Setup
 
 Requires Python 3.12+.
 
 ```bash
-git clone https://github.com/allenc84/claude-memory.git
-cd claude-memory
+git clone https://github.com/allenc84/claude-memory.git sapience
+cd sapience
 python3.12 -m venv venv
-./venv/bin/pip install -r requirements.txt
-cp .env.example .env   # then edit .env
+./venv/bin/pip install -e .
+cp .env.example .env   # then edit
 ```
 
-Set your keys and persona in `.env` (see `.env.example`):
+Configure `.env` (see `.env.example`):
 
 ```
-MEMORY_USER_CONTEXT="Jane Doe, founder of Acme"
+MEMORY_USER_CONTEXT="Jane Doe, founder of Acme"   # who the memory serves
 OPENAI_API_KEY=sk-proj-...
 ANTHROPIC_API_KEY=sk-ant-...
+# Optional:
+LEDGER_DOMAINS="predictions,decisions,commitments" # your judgment domains
+SAPIENCE_DATA_DIR=/absolute/path/to/data           # defaults to a per-user OS dir
 ```
 
-> On macOS, `run_server.sh` reads the API keys from the Keychain if present, falling back to `.env`:
+> **macOS Keychain (optional):** the `run_*.sh` scripts read keys from the Keychain if present, falling back to `.env`. Store keys as the `-w` **argument**, never via the interactive prompt — the prompt truncates at 128 chars and silently corrupts longer keys:
 > ```
-> security add-generic-password -U -s "OPENAI_API_KEY"    -a "claude-memory" -w 'sk-proj-...'
-> security add-generic-password -U -s "ANTHROPIC_API_KEY" -a "claude-memory" -w 'sk-ant-...'
+> security add-generic-password -U -s "OPENAI_API_KEY" -a "claude-memory" -w 'sk-proj-...'
 > ```
-> Pass the key as the `-w` argument, not via the interactive prompt — the prompt truncates at 128 characters and silently corrupts longer keys.
 
 ### Wire into Claude Code
 
-Add to your MCP config (e.g. `~/.claude.json` or project `.mcp.json`):
+Add to your MCP config (`~/.claude.json` or project `.mcp.json`):
 
 ```json
 {
   "mcpServers": {
-    "claude-memory": {
-      "command": "/absolute/path/to/claude-memory/run_server.sh"
+    "sapience": {
+      "command": "/absolute/path/to/sapience/run_server.sh"
     }
   }
 }
 ```
 
-Restart Claude Code. The server caches keys and config at launch, so restart after changing either.
+Or, with the package installed, point directly at the console script / module:
+
+```json
+{ "mcpServers": { "sapience": {
+  "command": "/absolute/path/to/sapience/venv/bin/python",
+  "args": ["-m", "sapience.server"],
+  "env": { "SAPIENCE_DATA_DIR": "/absolute/path/to/data" }
+} } }
+```
+
+Restart Claude Code. The server reads keys and config at launch — restart after changing either.
 
 ### The `/log` command
 
-`.claude/commands/log.md` provides a `/log` slash command for the judgment ledger — logging, reviewing, resolving, and generating calibrations/bias maps in natural language. Copy it into your project's `.claude/commands/` to use it.
+`.claude/commands/log.md` provides a `/log` slash command for the ledger — logging, reviewing, resolving, and generating calibrations/bias maps in natural language. Copy it into your project's `.claude/commands/`.
 
 ## Automation (optional)
 
-- `run_consolidate.sh` — nightly: extract semantic patterns from recent episodes. Schedule via cron/launchd.
-- `run_weekly_review.sh` — weekly judgment-ledger review; designed to be triggered from a Claude Code Stop hook.
+- `run_consolidate.sh` — nightly: extract semantic patterns from recent episodes (cron/launchd).
+- `run_weekly_review.sh` — weekly ledger review; designed for a Claude Code Stop hook.
 
 ## Migrating existing markdown memories
 
-To import legacy flat-file memories into the vector store:
-
 ```bash
-MEMORY_MIGRATE_DIR="$HOME/path/to/memory" ./venv/bin/python migrate.py
+MEMORY_MIGRATE_DIR="$HOME/path/to/memory" ./venv/bin/python -m sapience.migrate
 ```
 
 ## License
