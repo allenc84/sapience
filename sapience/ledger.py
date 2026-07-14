@@ -55,8 +55,11 @@ def _clamp_prob(p: float) -> float:
 
 
 def _outcome_value(score: int) -> float:
-    """Map a resolution score to a [0,1] outcome for Brier scoring:
-    1 = right -> 1.0, 0 = partial -> 0.5, -1 = wrong -> 0.0."""
+    """Map a resolution score to a [0,1] outcome for display purposes:
+    1 = right -> 1.0, 0 = partial -> 0.5, -1 = wrong -> 0.0.
+    Brier scoring uses binary outcomes only — partials are excluded there,
+    because a fractional 0.5 outcome breaks both the score and its base-rate
+    baseline (see calibration())."""
     return {1: 1.0, 0: 0.5, -1: 0.0}[score]
 
 
@@ -210,25 +213,39 @@ def calibration(domain: Optional[str] = None) -> dict:
     """Quantitative calibration over resolved assessments that have both a
     probability and a score.
 
-    Returns a Brier score (mean squared error of forecast vs. outcome; lower is
-    better, 0 is perfect), a base-rate baseline for comparison, a reliability
-    breakdown by confidence band, and over/under-confidence flags. `sufficient`
-    is False until MIN_CALIBRATION_N resolutions exist — below that, treat the
-    numbers as reflection, not a calibrated claim.
+    Brier scoring is computed over BINARY outcomes only (right=1, wrong=0).
+    Partial resolutions are excluded — a fractional 0.5 outcome corrupts both
+    the score and the base-rate baseline (baseline = p*(1-p) is the Brier of
+    always predicting the base rate, which holds only for outcomes in {0,1}).
+    Excluded partials are reported in `n_partial_excluded`; unresolved
+    forecasts in `pending` so selective resolution stays visible.
+
+    `sufficient` is False until MIN_CALIBRATION_N binary resolutions exist —
+    below that, treat the numbers as reflection, not a calibrated claim.
     """
     init_db()
     q = ("SELECT probability, score FROM assessments "
          "WHERE score IS NOT NULL AND probability IS NOT NULL")
+    pq = "SELECT COUNT(*) FROM assessments WHERE status='pending'"
     params: list = []
     if domain:
         q += " AND domain=?"
+        pq += " AND domain=?"
         params.append(domain)
     with _get_conn() as conn:
         rows = conn.execute(q, params).fetchall()
+        pending = conn.execute(pq, params).fetchone()[0]
 
-    pairs = [(float(r["probability"]), _outcome_value(r["score"])) for r in rows]
+    scored = [(float(r["probability"]), r["score"]) for r in rows]
+    pairs = [(p, 1.0 if s == 1 else 0.0) for p, s in scored if s != 0]
     n = len(pairs)
-    result = {"n": n, "sufficient": n >= MIN_CALIBRATION_N, "min_n": MIN_CALIBRATION_N}
+    result = {
+        "n": n,
+        "n_partial_excluded": len(scored) - n,
+        "pending": pending,
+        "sufficient": n >= MIN_CALIBRATION_N,
+        "min_n": MIN_CALIBRATION_N,
+    }
     if n == 0:
         result["brier"] = None
         return result
@@ -236,7 +253,8 @@ def calibration(domain: Optional[str] = None) -> dict:
     brier = sum((p - o) ** 2 for p, o in pairs) / n
     mean_conf = sum(p for p, _ in pairs) / n
     mean_outcome = sum(o for _, o in pairs) / n
-    baseline = mean_outcome * (1 - mean_outcome)  # always-predict-base-rate Brier
+    # Brier of always predicting the base rate; correct because outcomes are binary.
+    baseline = mean_outcome * (1 - mean_outcome)
 
     buckets = []
     for lo, hi, label in [(0.0, 0.65, "low"), (0.65, 0.85, "moderate"), (0.85, 1.01, "high")]:

@@ -26,16 +26,22 @@ def _get_client() -> anthropic.Anthropic:
 def _calibration_numbers_block(cal: dict) -> str:
     """Render the quantitative calibration as a compact block for the LLM prompt
     and the saved memory, so every narrative claim is anchored to real numbers."""
-    if not cal.get("brier"):
+    if cal.get("brier") is None:   # 0.0 is a perfect score, not missing data
         return "No scored forecasts yet — no quantitative calibration available."
     lines = [
-        f"n resolved: {cal['n']} (statistical threshold: {cal['min_n']} — "
-        f"{'MET' if cal['sufficient'] else 'NOT met, treat as reflection'})",
+        f"n scored (binary): {cal['n']} (minimum sample: {cal['min_n']} — "
+        f"{'met' if cal['sufficient'] else 'NOT met, treat as reflection'})",
         f"Brier score: {cal['brier']} (base-rate baseline {cal['baseline_brier']}; "
         f"{'beats' if cal['beats_baseline'] else 'does NOT beat'} baseline — lower is better)",
         f"Avg forecast: {cal['avg_confidence']}  vs  observed hit rate: {cal['observed_rate']}",
-        f"Full-right rate: {cal['hit_rate']}",
     ]
+    if cal.get("n_partial_excluded"):
+        lines.append(f"Partial resolutions excluded from scoring: {cal['n_partial_excluded']}")
+    if cal.get("pending"):
+        lines.append(
+            f"Unresolved (pending) forecasts: {cal['pending']} — calibration covers only "
+            f"what was resolved; unresolved misses would change these numbers."
+        )
     if cal.get("overconfident"):
         lines.append("Signal: OVERCONFIDENT (forecasts exceed outcomes by >10pts)")
     elif cal.get("underconfident"):
@@ -50,8 +56,8 @@ def generate_calibration(domain: str) -> Optional[dict]:
     Extract a calibration read from resolved assessments in a domain, grounded in
     the quantitative Brier/reliability stats. Writes a high-salience feedback
     memory. Returns None only if there is nothing scored yet. Below
-    ledger.MIN_CALIBRATION_N the result is flagged reflection-only, not a
-    statistically established bias.
+    ledger.MIN_CALIBRATION_N the result is flagged reflection-only; above it the
+    numbers are worth acting on but are still evidence of a tendency, not proof.
     """
     resolved = ledger.list_resolved(domain=domain, limit=100)
     if len(resolved) < 3:
@@ -110,10 +116,12 @@ def generate_calibration(domain: str) -> Optional[dict]:
                 f"conditions, and what should change in future sessions. Anchor the track_record "
                 f"in the Brier/reliability numbers above.\n\n"
                 + (
-                    "NOTE: the sample is below the statistical threshold. Frame this as a TENTATIVE "
+                    "NOTE: the sample is below the minimum threshold. Frame this as a TENTATIVE "
                     "reflection and an early signal to watch — NOT an established bias. Do not overclaim.\n\n"
                     if not cal["sufficient"] else
-                    "The sample meets the statistical threshold; you may state calibration patterns as established.\n\n"
+                    "The sample meets the minimum threshold. State the pattern as a supported tendency, "
+                    "not proof — mind the per-band sample sizes, and note that unresolved forecasts "
+                    "are not reflected in these numbers.\n\n"
                 )
                 + f"RESOLVED ASSESSMENTS:\n{assessment_text}"
             ),
@@ -174,9 +182,11 @@ def generate_bias_map(domain: Optional[str] = None) -> dict:
     if not resolved:
         return {"status": "no_resolved_assessments", "stats": stats}
 
-    overall_cal = stats.get("calibration", {}).get("overall", {})
-    numbers_block = _calibration_numbers_block(overall_cal)
-    sufficient = overall_cal.get("sufficient", False)
+    # Ground the numbers in the same scope as the assessments: domain-filtered
+    # when a domain is given, overall otherwise.
+    cal = ledger.calibration(domain)
+    numbers_block = _calibration_numbers_block(cal)
+    sufficient = cal.get("sufficient", False)
 
     assessment_text = "\n\n".join(
         f"[{a['domain']} | {a['date_made'][:10]} | confidence={a['confidence']} | "

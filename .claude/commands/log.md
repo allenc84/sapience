@@ -29,7 +29,7 @@ Extract the following from the natural language description:
 - **logic**: The reasoning behind the call *at this moment*. Pull from context or ask the user if unclear.
 - **conditions**: Relevant conditions — price levels, team state, market context, etc.
 
-Call `mcp__claude-memory__log_assessment` with the extracted fields. Then confirm back:
+Call `mcp__sapience__log_assessment` with the extracted fields. Then confirm back:
 
 > Logged: [text] | [domain] | [confidence] | horizon: [horizon] | ID: [id]
 
@@ -39,7 +39,7 @@ If the input is ambiguous (domain unclear, no horizon, logic missing), make reas
 
 ## REVIEW: `/log review [domain]`
 
-Call `mcp__claude-memory__list_pending_assessments` (with domain filter if provided).
+Call `mcp__sapience__list_pending_assessments` (with domain filter if provided).
 
 Format the results as a table:
 
@@ -56,7 +56,7 @@ After the table, prompt: "To resolve any of these: `/log resolve <id>`"
 
 ## RESOLVE: `/log resolve <id>`
 
-1. Call `mcp__claude-memory__list_pending_assessments` to find the assessment matching the given ID (first 8 chars is enough to identify uniquely in most cases — match on prefix).
+1. Call `mcp__sapience__list_pending_assessments` to find the assessment matching the given ID (first 8 chars is enough to identify uniquely in most cases — match on prefix).
 
 2. Display the assessment:
    > **Assessment**: [text]
@@ -67,7 +67,7 @@ After the table, prompt: "To resolve any of these: `/log resolve <id>`"
    - What actually happened? (the outcome)
    - Score: 1 (right), 0 (partial), or -1 (wrong)?
 
-4. Call `mcp__claude-memory__resolve_assessment` with the full ID, outcome, and score.
+4. Call `mcp__sapience__resolve_assessment` with the full ID, outcome, and score.
 
 5. Confirm: "Resolved: [score label] — [outcome]"
 
@@ -77,7 +77,7 @@ After the table, prompt: "To resolve any of these: `/log resolve <id>`"
 
 ## CALIBRATION: `/log calibration <domain>`
 
-Call `mcp__claude-memory__generate_calibration` for the specified domain.
+Call `mcp__sapience__generate_calibration` for the specified domain.
 
 Display the result:
 > **Brier**: [calibration.brier] (baseline [calibration.baseline_brier] — [beats/does not beat])
@@ -93,7 +93,7 @@ If `sufficient` is false, prefix with: "⚠️ Reflection only — below the sta
 
 ## BIAS MAP: `/log bias`
 
-Call `mcp__claude-memory__get_bias_map` with no domain filter.
+Call `mcp__sapience__get_bias_map` with no domain filter.
 
 Display:
 - Primary blind spot

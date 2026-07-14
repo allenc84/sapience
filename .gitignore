@@ -225,3 +225,4 @@ dist/
 .weekly_review_state.json
 .DS_Store
 chat-transcript-*.md
+chroma_db.backup-*/

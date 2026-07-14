@@ -497,10 +497,10 @@ Be specific. These will be used to develop the user's thinking, not just summari
                 "remaining_pending_in_domain": remaining,
                 "total_resolved_in_domain": resolved_count,
                 "tip": (
-                    f"Run generate_calibration(domain='{item['domain']}') — enough data for a statistical read."
+                    f"Run generate_calibration(domain='{item['domain']}') — enough data for a quantitative read."
                     if resolved_count >= ledger.MIN_CALIBRATION_N else
                     f"generate_calibration works now but is reflection-only until {ledger.MIN_CALIBRATION_N} resolved "
-                    f"({ledger.MIN_CALIBRATION_N - resolved_count} to go) — a bias isn't statistically real yet."
+                    f"({ledger.MIN_CALIBRATION_N - resolved_count} to go) — below that, patterns are signals to watch, not conclusions."
                 ),
             }, indent=2))]
 
