@@ -24,7 +24,7 @@ Extract the following from the natural language description:
 
 - **text**: The assessment or prediction, stated clearly and specifically. Include prices, names, quantities.
 - **domain**: One of the configured `LEDGER_DOMAINS`. Infer from context which domain the assessment belongs to; if none fits cleanly, pick the closest and note the inference in the confirmation.
-- **confidence**: `high` / `moderate` / `low`. Default `moderate` unless stated.
+- **probability**: a number 0-1 for how likely the call is to prove right (e.g. `0.7`). Prefer this — it's what makes calibration (Brier score) real. Extract it if the user gives odds/percentages; otherwise fall back to **confidence** (`high`/`moderate`/`low`, default `moderate`), which maps to 0.9/0.75/0.6.
 - **horizon**: e.g. "3 months", "2 weeks", "end of Q3". Infer from context. Leave blank if not determinable.
 - **logic**: The reasoning behind the call *at this moment*. Pull from context or ask the user if unclear.
 - **conditions**: Relevant conditions — price levels, team state, market context, etc.
@@ -80,10 +80,14 @@ After the table, prompt: "To resolve any of these: `/log resolve <id>`"
 Call `mcp__claude-memory__generate_calibration` for the specified domain.
 
 Display the result:
+> **Brier**: [calibration.brier] (baseline [calibration.baseline_brier] — [beats/does not beat])
+> **Forecast vs. observed**: [calibration.avg_confidence] vs [calibration.observed_rate]
 > **Pattern**: [pattern]
 > **Track record**: [track_record]
 > **Apply as**: [instruction]
 > Calibration memory saved (ID: [memory_id])
+
+If `sufficient` is false, prefix with: "⚠️ Reflection only — below the statistical threshold ([calibration.n]/[calibration.min_n] resolved). Treat as an early signal, not an established bias."
 
 ---
 

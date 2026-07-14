@@ -168,7 +168,8 @@ async def list_tools() -> list[types.Tool]:
             description=(
                 "Log a forward-looking assessment to the judgment ledger. "
                 "Use this whenever making a prediction, recommendation, or forward-looking call. "
-                "These are tracked and scored over time to build calibration."
+                "Prefer a numeric 'probability' (0-1) — it enables real calibration (Brier score) "
+                "over time. Assessments are tracked and later scored against what actually happened."
             ),
             inputSchema={
                 "type": "object",
@@ -182,9 +183,13 @@ async def list_tools() -> list[types.Tool]:
                         "description": "Assessment domain (one of the configured LEDGER_DOMAINS)",
                         "enum": sorted(ledger.DOMAINS)
                     },
+                    "probability": {
+                        "type": "number",
+                        "description": "Forecast probability the call proves right, 0-1 (e.g. 0.7). Preferred over 'confidence'; enables Brier scoring."
+                    },
                     "confidence": {
                         "type": "string",
-                        "description": "Confidence level",
+                        "description": "Categorical confidence, used only if 'probability' is omitted (high=0.9, moderate=0.75, low=0.6)",
                         "enum": ["high", "moderate", "low"],
                         "default": "moderate"
                     },
@@ -448,12 +453,17 @@ Be specific. These will be used to develop the user's thinking, not just summari
                 text=arguments["text"],
                 domain=arguments["domain"],
                 confidence=arguments.get("confidence", "moderate"),
+                probability=arguments.get("probability"),
                 horizon=arguments.get("horizon", ""),
                 logic=arguments.get("logic", ""),
                 conditions=arguments.get("conditions", ""),
                 source_session=arguments.get("source_session", ""),
             )
-            return [types.TextContent(type="text", text=json.dumps({"id": aid, "status": "logged"}))]
+            logged = ledger.get_by_id(aid)
+            return [types.TextContent(type="text", text=json.dumps({
+                "id": aid, "status": "logged",
+                "probability": logged["probability"], "confidence": logged["confidence"],
+            }))]
 
         elif name == "list_pending_assessments":
             items = ledger.list_pending(
@@ -492,9 +502,10 @@ Be specific. These will be used to develop the user's thinking, not just summari
                 "remaining_pending_in_domain": remaining,
                 "total_resolved_in_domain": resolved_count,
                 "tip": (
-                    f"Run generate_calibration(domain='{item['domain']}') to update calibration priors."
-                    if resolved_count >= 3 else
-                    f"Need {3 - resolved_count} more resolved assessments before calibration can run."
+                    f"Run generate_calibration(domain='{item['domain']}') — enough data for a statistical read."
+                    if resolved_count >= ledger.MIN_CALIBRATION_N else
+                    f"generate_calibration works now but is reflection-only until {ledger.MIN_CALIBRATION_N} resolved "
+                    f"({ledger.MIN_CALIBRATION_N - resolved_count} to go) — a bias isn't statistically real yet."
                 ),
             }, indent=2))]
 

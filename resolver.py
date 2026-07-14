@@ -23,19 +23,45 @@ def _get_client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=api_key)
 
 
+def _calibration_numbers_block(cal: dict) -> str:
+    """Render the quantitative calibration as a compact block for the LLM prompt
+    and the saved memory, so every narrative claim is anchored to real numbers."""
+    if not cal.get("brier"):
+        return "No scored forecasts yet — no quantitative calibration available."
+    lines = [
+        f"n resolved: {cal['n']} (statistical threshold: {cal['min_n']} — "
+        f"{'MET' if cal['sufficient'] else 'NOT met, treat as reflection'})",
+        f"Brier score: {cal['brier']} (base-rate baseline {cal['baseline_brier']}; "
+        f"{'beats' if cal['beats_baseline'] else 'does NOT beat'} baseline — lower is better)",
+        f"Avg forecast: {cal['avg_confidence']}  vs  observed hit rate: {cal['observed_rate']}",
+        f"Full-right rate: {cal['hit_rate']}",
+    ]
+    if cal.get("overconfident"):
+        lines.append("Signal: OVERCONFIDENT (forecasts exceed outcomes by >10pts)")
+    elif cal.get("underconfident"):
+        lines.append("Signal: UNDERCONFIDENT (outcomes exceed forecasts by >10pts)")
+    for b in cal.get("buckets", []):
+        lines.append(f"  {b['band']} band: n={b['n']}, avg forecast {b['avg_confidence']} → observed {b['observed_rate']}")
+    return "\n".join(lines)
+
+
 def generate_calibration(domain: str) -> Optional[dict]:
     """
-    Extract calibration pattern from all resolved assessments in a domain.
-    Writes a high-salience feedback memory to ChromaDB. Returns summary or None
-    if not enough data.
+    Extract a calibration read from resolved assessments in a domain, grounded in
+    the quantitative Brier/reliability stats. Writes a high-salience feedback
+    memory. Returns None only if there is nothing scored yet. Below
+    ledger.MIN_CALIBRATION_N the result is flagged reflection-only, not a
+    statistically established bias.
     """
     resolved = ledger.list_resolved(domain=domain, limit=100)
-
     if len(resolved) < 3:
         return None
 
+    cal = ledger.calibration(domain)
+    numbers_block = _calibration_numbers_block(cal)
+
     assessment_text = "\n\n".join(
-        f"[{a['date_made'][:10]} | confidence={a['confidence']} | "
+        f"[{a['date_made'][:10]} | forecast={a.get('probability')} ({a['confidence']}) | "
         f"score={'RIGHT' if a['score'] == 1 else ('PARTIAL' if a['score'] == 0 else 'WRONG')}]\n"
         f"Assessment: {a['text']}\n"
         f"Logic at time: {a['logic'] or 'not recorded'}\n"
@@ -79,19 +105,27 @@ def generate_calibration(domain: str) -> Optional[dict]:
             "role": "user",
             "content": (
                 f'Analyze these resolved assessments in the domain "{domain}" for {USER_CONTEXT}.\n\n'
-                f"Extract the primary calibration pattern — where is judgment systematically off, "
-                f"under what conditions, and what should change in future sessions.\n\n"
-                f"Be honest and specific. This will be injected as a prior into future sessions "
-                f"to prevent repeating the same errors.\n\n"
-                f"RESOLVED ASSESSMENTS:\n{assessment_text}"
+                f"QUANTITATIVE CALIBRATION (ground every claim in these numbers):\n{numbers_block}\n\n"
+                f"Extract the primary calibration pattern — where is judgment off, under what "
+                f"conditions, and what should change in future sessions. Anchor the track_record "
+                f"in the Brier/reliability numbers above.\n\n"
+                + (
+                    "NOTE: the sample is below the statistical threshold. Frame this as a TENTATIVE "
+                    "reflection and an early signal to watch — NOT an established bias. Do not overclaim.\n\n"
+                    if not cal["sufficient"] else
+                    "The sample meets the statistical threshold; you may state calibration patterns as established.\n\n"
+                )
+                + f"RESOLVED ASSESSMENTS:\n{assessment_text}"
             ),
         }],
     )
 
     extracted = response.content[0].input
 
+    header = "CALIBRATION" if cal["sufficient"] else "CALIBRATION (reflection — below statistical threshold)"
     content = (
-        f"CALIBRATION — {domain.upper()}\n\n"
+        f"{header} — {domain.upper()}\n\n"
+        f"Quantitative read:\n{numbers_block}\n\n"
         f"Pattern: {extracted['pattern']}\n\n"
         f"Conditions where this applies: {extracted['conditions']}\n\n"
         f"Track record: {extracted['track_record']}\n\n"
@@ -121,6 +155,8 @@ def generate_calibration(domain: str) -> Optional[dict]:
         "memory_id": mid,
         "domain": domain,
         "assessments_used": len(resolved),
+        "sufficient": cal["sufficient"],
+        "calibration": cal,
         "pattern": extracted["pattern"],
         "track_record": extracted["track_record"],
         "instruction": extracted["instruction"],
@@ -137,6 +173,10 @@ def generate_bias_map(domain: Optional[str] = None) -> dict:
 
     if not resolved:
         return {"status": "no_resolved_assessments", "stats": stats}
+
+    overall_cal = stats.get("calibration", {}).get("overall", {})
+    numbers_block = _calibration_numbers_block(overall_cal)
+    sufficient = overall_cal.get("sufficient", False)
 
     assessment_text = "\n\n".join(
         f"[{a['domain']} | {a['date_made'][:10]} | confidence={a['confidence']} | "
@@ -197,9 +237,15 @@ def generate_bias_map(domain: Optional[str] = None) -> dict:
             "role": "user",
             "content": (
                 f"Generate a bias map for {USER_CONTEXT} based on these resolved assessments.\n\n"
+                f"QUANTITATIVE CALIBRATION (ground claims in these numbers):\n{numbers_block}\n\n"
                 "Be specific — name conditions under which judgment is good vs. poor. "
                 "Quantify where possible. This is for a quarterly self-calibration review.\n\n"
-                f"ASSESSMENTS:\n{assessment_text}"
+                + (
+                    "NOTE: sample is below the statistical threshold — frame findings as tentative "
+                    "signals to watch, not established biases.\n\n"
+                    if not sufficient else ""
+                )
+                + f"ASSESSMENTS:\n{assessment_text}"
             ),
         }],
     )
@@ -207,5 +253,6 @@ def generate_bias_map(domain: Optional[str] = None) -> dict:
     bias_map = response.content[0].input
     bias_map["stats"] = stats
     bias_map["total_resolved"] = len(resolved)
+    bias_map["sufficient"] = sufficient
 
     return bias_map
