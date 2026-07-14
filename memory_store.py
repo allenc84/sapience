@@ -80,6 +80,31 @@ def save(
     return mid
 
 
+def delete(memory_id: str) -> bool:
+    """Delete a single memory by id. Returns True if it existed."""
+    collection = _get_collection()
+    existing = collection.get(ids=[memory_id])
+    if not existing["ids"]:
+        return False
+    collection.delete(ids=[memory_id])
+    return True
+
+
+def delete_where(where: dict) -> int:
+    """Delete every memory matching a metadata filter. Returns the number deleted.
+
+    Used to keep regenerated memories (consolidation summaries, calibration
+    feedback) idempotent: delete the prior version for a key before writing the
+    new one, so repeated runs replace rather than accumulate duplicates.
+    """
+    collection = _get_collection()
+    existing = collection.get(where=where)
+    ids = existing.get("ids", [])
+    if ids:
+        collection.delete(ids=ids)
+    return len(ids)
+
+
 def search(
     query: str,
     top_k: int = 5,

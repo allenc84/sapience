@@ -116,6 +116,16 @@ def run(days_back: int = 7) -> dict:
             semantic_content = "\n\n".join(content_parts)
             source_ids = [m.id for m in memories]
 
+            # Idempotency: replace any prior consolidation summary for this topic
+            # so repeated runs over the same window don't accumulate duplicates.
+            memory_store.delete_where({
+                "$and": [
+                    {"type": {"$eq": "semantic"}},
+                    {"source": {"$eq": "consolidation"}},
+                    {"topic": {"$eq": topic}},
+                ]
+            })
+
             memory_store.save(
                 content=semantic_content,
                 memory_type="semantic",

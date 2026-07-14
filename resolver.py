@@ -98,6 +98,16 @@ def generate_calibration(domain: str) -> Optional[dict]:
         f"Apply as: {extracted['instruction']}"
     )
 
+    # Idempotency: replace any prior calibration feedback for this domain so
+    # re-running (e.g. weekly) updates the pattern instead of duplicating it.
+    memory_store.delete_where({
+        "$and": [
+            {"type": {"$eq": "feedback"}},
+            {"source": {"$eq": "resolver"}},
+            {"topic": {"$eq": f"calibration-{domain}"}},
+        ]
+    })
+
     mid = memory_store.save(
         content=content,
         memory_type="feedback",
