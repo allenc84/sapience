@@ -11,8 +11,7 @@ from pathlib import Path
 
 import frontmatter
 
-sys.path.insert(0, str(Path(__file__).parent))
-import memory_store
+from . import memory_store
 
 # OpenAI text-embedding-3-small limit is 8192 tokens (~6000 words). We chunk conservatively.
 MAX_CHARS = 12000

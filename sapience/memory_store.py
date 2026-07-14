@@ -8,10 +8,12 @@ from typing import Optional
 import chromadb
 from chromadb.config import Settings
 
-from schema import Memory, SearchResult, MEMORY_TYPES
-from embeddings import embed, embed_batch
+from .schema import Memory, SearchResult, MEMORY_TYPES
+from .embeddings import embed, embed_batch
 
-DB_PATH = Path(os.environ.get("MEMORY_DB_PATH", Path(__file__).parent / "chroma_db"))
+from .paths import data_dir
+
+DB_PATH = Path(os.environ.get("MEMORY_DB_PATH") or (data_dir() / "chroma_db"))
 
 
 def _get_collection() -> chromadb.Collection:
@@ -123,9 +125,13 @@ def search(
         if valid:
             where = {"type": {"$in": valid}}
 
+    # Over-fetch semantic candidates so the salience reranking below can promote
+    # an important-but-slightly-less-similar memory above a top_k cutoff. Without
+    # this, salience could only reorder within the first top_k by pure similarity.
+    fetch_n = min(max(top_k * 5, top_k), collection.count())
     results = collection.query(
         query_embeddings=[query_embedding],
-        n_results=min(top_k, collection.count()),
+        n_results=fetch_n,
         where=where,
         include=["documents", "metadatas", "distances"],
     )
@@ -141,9 +147,12 @@ def search(
         mem = _metadata_to_memory(doc, meta, mid)
         if mem.salience >= min_salience:
             output.append(SearchResult(memory=mem, score=score))
-            _increment_access(collection, mid)
 
-    return sorted(output, key=lambda r: r.score * (0.5 + r.memory.salience), reverse=True)
+    ranked = sorted(output, key=lambda r: r.score * (0.5 + r.memory.salience), reverse=True)[:top_k]
+    # Only count an access for memories actually returned, not every candidate fetched.
+    for r in ranked:
+        _increment_access(collection, r.memory.id)
+    return ranked
 
 
 def get(memory_id: str) -> Optional[Memory]:

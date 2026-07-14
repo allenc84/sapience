@@ -11,9 +11,9 @@ from typing import Optional
 
 import anthropic
 
-import memory_store
-from schema import USER_CONTEXT
-import ledger
+from . import memory_store
+from . import ledger
+from .schema import USER_CONTEXT
 
 
 def _get_client() -> anthropic.Anthropic:

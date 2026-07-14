@@ -11,8 +11,8 @@ from datetime import datetime, timezone, timedelta
 
 import anthropic
 
-import memory_store
-from schema import Memory, USER_CONTEXT
+from . import memory_store
+from .schema import Memory, USER_CONTEXT
 
 
 def _get_client() -> anthropic.Anthropic:

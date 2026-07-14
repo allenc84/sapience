@@ -5,3 +5,4 @@ mcp>=1.0.0
 python-frontmatter>=1.1.0
 python-dotenv>=1.0.0
 pyyaml>=6.0
+platformdirs>=4.0

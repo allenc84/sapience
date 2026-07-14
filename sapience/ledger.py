@@ -13,7 +13,9 @@ from pathlib import Path
 from typing import Optional
 import os
 
-LEDGER_PATH = Path(os.environ.get("LEDGER_DB_PATH", Path(__file__).parent / "ledger.db"))
+from .paths import data_dir
+
+LEDGER_PATH = Path(os.environ.get("LEDGER_DB_PATH") or (data_dir() / "ledger.db"))
 
 # Judgment domains this ledger tracks. Customize via LEDGER_DOMAINS in your .env
 # (comma-separated), e.g. LEDGER_DOMAINS="investments,team-management,strategic-bets".

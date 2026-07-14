@@ -9,4 +9,4 @@ fi
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$DIR/.env" ] && set -a && . "$DIR/.env" && set +a
 cd "$DIR"
-exec "$DIR/venv/bin/python" "$DIR/consolidator.py"
+exec "$DIR/venv/bin/python" -m sapience.consolidator

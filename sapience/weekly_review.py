@@ -15,11 +15,13 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import memory_store
-import ledger
-import resolver
+from . import memory_store
+from . import ledger
+from . import resolver
 
-STATE_FILE = Path(__file__).parent / ".weekly_review_state.json"
+from .paths import data_dir
+
+STATE_FILE = data_dir() / ".weekly_review_state.json"
 INTERVAL_DAYS = 6
 
 

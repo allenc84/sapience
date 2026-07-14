@@ -7,8 +7,9 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Load local config (e.g. MEMORY_USER_CONTEXT); also a fallback source for API keys.
 [ -f "$DIR/.env" ] && set -a && . "$DIR/.env" && set +a
 # Kill only orphaned server instances (parent exited, PID 1 adopted them)
-ps -eo ppid,pid | awk -v pat="server.py" 'NR>1 && $1==1' | while read ppid pid; do
+ps -eo ppid,pid | awk 'NR>1 && $1==1 {print $2}' | while read pid; do
     cmd=$(ps -p "$pid" -o command= 2>/dev/null)
-    [[ "$cmd" == *"$DIR/server.py"* ]] && kill "$pid" 2>/dev/null
+    [[ "$cmd" == *"sapience.server"* ]] && kill "$pid" 2>/dev/null
 done
-exec "$DIR/venv/bin/python" "$DIR/server.py"
+cd "$DIR"
+exec "$DIR/venv/bin/python" -m sapience.server

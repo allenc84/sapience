@@ -4,23 +4,18 @@ MCP server — Claude Code calls these tools instead of reading flat markdown fi
 
 import asyncio
 import json
-import sys
-from pathlib import Path
-
-# Ensure local imports work when run as MCP subprocess
-sys.path.insert(0, str(Path(__file__).parent))
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp import types
 
-import memory_store
-import consolidator
-import ledger
-import resolver
-from schema import MEMORY_TYPES, USER_CONTEXT
+from . import memory_store
+from . import consolidator
+from . import ledger
+from . import resolver
+from .schema import MEMORY_TYPES, USER_CONTEXT
 
-app = Server("claude-memory")
+app = Server("sapience")
 
 
 @app.list_tools()
@@ -537,5 +532,10 @@ async def main():
         await app.run(read_stream, write_stream, app.create_initialization_options())
 
 
-if __name__ == "__main__":
+def cli():
+    """Console-script entry point (`sapience`) and `python -m sapience.server`."""
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    cli()

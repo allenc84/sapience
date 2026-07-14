@@ -8,4 +8,4 @@ fi
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$DIR/.env" ] && set -a && . "$DIR/.env" && set +a
 cd "$DIR"
-"$DIR/venv/bin/python" "$DIR/weekly_review.py" >> /tmp/weekly_review.log 2>&1 || exit 0
+"$DIR/venv/bin/python" -m sapience.weekly_review >> /tmp/weekly_review.log 2>&1 || exit 0
