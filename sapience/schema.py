@@ -32,6 +32,7 @@ class Memory:
     last_accessed: Optional[str] = None
     related_ids: List[str] = field(default_factory=list)
     metadata: Dict = field(default_factory=dict)
+    namespace: str = "default"   # partitions memories per project/workspace
 
 
 @dataclass

@@ -118,8 +118,11 @@ def run(days_back: int = 7) -> dict:
 
             # Idempotency: replace any prior consolidation summary for this topic
             # so repeated runs over the same window don't accumulate duplicates.
+            # Scoped to this namespace — another workspace's summary for the same
+            # topic name is a different memory.
             memory_store.delete_where({
                 "$and": [
+                    {"namespace": {"$eq": memory_store.DEFAULT_NAMESPACE}},
                     {"type": {"$eq": "semantic"}},
                     {"source": {"$eq": "consolidation"}},
                     {"topic": {"$eq": topic}},

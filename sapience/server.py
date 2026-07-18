@@ -45,6 +45,10 @@ async def list_tools() -> list[types.Tool]:
                         "type": "array",
                         "items": {"type": "string"},
                         "description": f"Filter by memory type. Options: {sorted(MEMORY_TYPES)}. Omit to search all."
+                    },
+                    "namespace": {
+                        "type": "string",
+                        "description": "Namespace to search. Omit for this server's namespace; '*' searches every namespace."
                     }
                 },
                 "required": ["query"]
@@ -81,6 +85,10 @@ async def list_tools() -> list[types.Tool]:
                         "type": "string",
                         "description": "Where this came from",
                         "default": "conversation"
+                    },
+                    "namespace": {
+                        "type": "string",
+                        "description": "Namespace to save into. Omit for this server's namespace."
                     }
                 },
                 "required": ["content", "memory_type"]
@@ -149,7 +157,11 @@ async def list_tools() -> list[types.Tool]:
                         "type": "string",
                         "description": f"Filter by type. One of: {sorted(MEMORY_TYPES)}. Omit for all."
                     },
-                    "limit": {"type": "integer", "default": 20}
+                    "limit": {"type": "integer", "default": 20},
+                    "namespace": {
+                        "type": "string",
+                        "description": "Namespace to list. Omit for this server's namespace; '*' lists every namespace."
+                    }
                 }
             }
         ),
@@ -228,6 +240,10 @@ async def list_tools() -> list[types.Tool]:
                         "type": "string",
                         "description": f"Export only this type. One of: {sorted(MEMORY_TYPES)}. Omit for all.",
                         "enum": sorted(MEMORY_TYPES)
+                    },
+                    "namespace": {
+                        "type": "string",
+                        "description": "Namespace to export. Defaults to '*' (every namespace) — exports are backups."
                     }
                 }
             }
@@ -252,6 +268,10 @@ async def list_tools() -> list[types.Tool]:
                         "type": "integer",
                         "description": "Max pairs to return (default 50)",
                         "default": 50
+                    },
+                    "namespace": {
+                        "type": "string",
+                        "description": "Namespace to scan. Omit for this server's namespace."
                     }
                 }
             }
@@ -404,11 +424,13 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 query=arguments["query"],
                 top_k=arguments.get("top_k", 6),
                 types=arguments.get("types"),
+                namespace=arguments.get("namespace"),
             )
             output = [
                 {
                     "id": r.memory.id,
                     "score": round(r.score, 3),
+                    "namespace": r.memory.namespace,
                     "type": r.memory.type,
                     "topic": r.memory.topic,
                     "salience": r.memory.salience,
@@ -426,6 +448,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 salience=arguments.get("salience", 0.5),
                 topic=arguments.get("topic", ""),
                 source=arguments.get("source", "conversation"),
+                namespace=arguments.get("namespace"),
             )
             return [types.TextContent(type="text", text=json.dumps({"id": mid, "status": "saved"}))]
 
@@ -515,11 +538,13 @@ Be specific. These will be used to develop the user's thinking, not just summari
         elif name == "list_memories":
             memories = memory_store.list_recent(
                 memory_type=arguments.get("memory_type"),
-                limit=arguments.get("limit", 20)
+                limit=arguments.get("limit", 20),
+                namespace=arguments.get("namespace"),
             )
             output = [
                 {
                     "id": m.id,
+                    "namespace": m.namespace,
                     "type": m.type,
                     "topic": m.topic,
                     "salience": m.salience,
@@ -534,11 +559,13 @@ Be specific. These will be used to develop the user's thinking, not just summari
             total = memory_store.count()
             by_type = {}
             for t in MEMORY_TYPES:
-                mems = memory_store.list_recent(memory_type=t, limit=1000)
+                mems = memory_store.list_recent(memory_type=t, limit=1000, namespace="*")
                 by_type[t] = len(mems)
             return [types.TextContent(type="text", text=json.dumps({
                 "total": total,
                 "by_type": by_type,
+                "by_namespace": memory_store.list_namespaces(),
+                "active_namespace": memory_store.DEFAULT_NAMESPACE,
             }))]
 
         elif name == "get_memory":
@@ -549,6 +576,7 @@ Be specific. These will be used to develop the user's thinking, not just summari
                 ))]
             return [types.TextContent(type="text", text=json.dumps({
                 "id": mem.id,
+                "namespace": mem.namespace,
                 "type": mem.type,
                 "topic": mem.topic,
                 "salience": mem.salience,
@@ -606,7 +634,10 @@ Be specific. These will be used to develop the user's thinking, not just summari
             from datetime import datetime, timezone
             from pathlib import Path
             from .paths import data_dir
-            records = memory_store.export_all(memory_type=arguments.get("memory_type"))
+            records = memory_store.export_all(
+                memory_type=arguments.get("memory_type"),
+                namespace=arguments.get("namespace", "*"),
+            )
             if arguments.get("path"):
                 out_path = Path(arguments["path"]).expanduser()
             else:
@@ -626,6 +657,7 @@ Be specific. These will be used to develop the user's thinking, not just summari
             pairs = memory_store.find_duplicates(
                 threshold=arguments.get("threshold", 0.92),
                 limit=arguments.get("limit", 50),
+                namespace=arguments.get("namespace"),
             )
             return [types.TextContent(type="text", text=json.dumps({
                 "pairs_found": len(pairs),

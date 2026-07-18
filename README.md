@@ -63,7 +63,12 @@ ANTHROPIC_API_KEY=sk-ant-...
 # Optional:
 LEDGER_DOMAINS="predictions,decisions,commitments" # your judgment domains
 SAPIENCE_DATA_DIR=/absolute/path/to/data           # defaults to a per-user OS dir
+SAPIENCE_NAMESPACE=work                            # memory namespace (default: "default")
 ```
+
+### Namespaces
+
+Memories are partitioned by **namespace** — set `SAPIENCE_NAMESPACE` per project/workspace (e.g. in a project's `.mcp.json` `env` block) to keep contexts separate inside one database. Reads and writes default to the server's namespace; pass `namespace: "*"` to `search_memory`/`list_memories` to read across all of them, and `memory_stats` shows the per-namespace breakdown. Records created before namespaces existed are stamped `default` automatically on first read. The judgment ledger is deliberately **not** namespaced — your track record is yours, not a project's.
 
 > **macOS Keychain (optional):** the `run_*.sh` scripts read keys from the Keychain if present, falling back to `.env`. Store keys as the `-w` **argument**, never via the interactive prompt — the prompt truncates at 128 chars and silently corrupts longer keys:
 > ```

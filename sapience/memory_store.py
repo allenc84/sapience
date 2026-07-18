@@ -15,6 +15,57 @@ from .paths import data_dir
 
 DB_PATH = Path(os.environ.get("MEMORY_DB_PATH") or (data_dir() / "chroma_db"))
 
+# Namespace this process reads and writes by default. Namespaces partition
+# memories (e.g. per project or workspace) inside one DB; the judgment ledger
+# is deliberately NOT namespaced — a person's track record is global.
+# Pass namespace="*" to read across all namespaces.
+DEFAULT_NAMESPACE = os.environ.get("SAPIENCE_NAMESPACE", "default")
+
+_namespace_backfilled = False
+
+
+def _ensure_namespace_backfill(collection: chromadb.Collection) -> None:
+    """Stamp namespace='default' onto records created before namespaces existed.
+
+    Runs once per process, metadata-only (never touches the vector segment).
+    Without this, pre-namespace records would be invisible to every
+    namespace-filtered query.
+    """
+    global _namespace_backfilled
+    if _namespace_backfilled:
+        return
+    _namespace_backfilled = True
+    try:
+        got = collection.get(include=["metadatas"])
+        ids, metas = [], []
+        for mid, meta in zip(got["ids"], got["metadatas"]):
+            if meta is not None and "namespace" not in meta:
+                m = meta.copy()
+                m["namespace"] = "default"
+                ids.append(mid)
+                metas.append(m)
+        if ids:
+            collection.update(ids=ids, metadatas=metas)
+    except Exception:
+        _namespace_backfilled = False
+
+
+def _namespace_clause(namespace: str | None) -> dict | None:
+    """Chroma where-clause for a namespace; None for the all-namespaces wildcard."""
+    ns = namespace or DEFAULT_NAMESPACE
+    if ns == "*":
+        return None
+    return {"namespace": {"$eq": ns}}
+
+
+def _combine_where(*clauses: dict | None) -> dict | None:
+    present = [c for c in clauses if c]
+    if not present:
+        return None
+    if len(present) == 1:
+        return present[0]
+    return {"$and": present}
+
 
 def _get_collection() -> chromadb.Collection:
     client = chromadb.PersistentClient(
@@ -35,6 +86,7 @@ def _metadata_to_memory(doc: str, meta: dict, id: str) -> Memory:
     return Memory(
         id=id,
         content=doc,
+        namespace=meta.get("namespace", "default"),
         type=meta.get("type", "episodic"),
         created_at=meta.get("created_at", _now()),
         salience=float(meta.get("salience", 0.5)),
@@ -56,9 +108,13 @@ def save(
     related_ids: list[str] | None = None,
     metadata: dict | None = None,
     memory_id: str | None = None,
+    namespace: str | None = None,
 ) -> str:
     if memory_type not in MEMORY_TYPES:
         raise ValueError(f"Invalid memory type '{memory_type}'. Must be one of: {MEMORY_TYPES}")
+    ns = namespace or DEFAULT_NAMESPACE
+    if ns == "*":
+        raise ValueError("namespace '*' is a read-side wildcard; saves need a concrete namespace")
 
     collection = _get_collection()
     mid = memory_id or str(uuid.uuid4())
@@ -69,6 +125,7 @@ def save(
         embeddings=[embedding],
         documents=[content],
         metadatas=[{
+            "namespace": ns,
             "type": memory_type,
             "salience": salience,
             "source": source,
@@ -123,14 +180,21 @@ def update(
     return _metadata_to_memory(new_doc, meta, memory_id)
 
 
-def export_all(memory_type: str | None = None) -> list[dict]:
-    """Return every memory (optionally one type) as plain dicts for export.
+def export_all(memory_type: str | None = None, namespace: str | None = "*") -> list[dict]:
+    """Return every memory (optionally one type/namespace) as plain dicts for export.
+
+    Defaults to ALL namespaces — an export is a backup, and a backup that
+    silently drops other namespaces' records is a data-loss trap.
 
     Embeddings are deliberately excluded — they are recomputable, and their
     bulk read path is the one that fails on a corrupted vector segment.
     """
     collection = _get_collection()
-    where = {"type": memory_type} if memory_type else None
+    _ensure_namespace_backfill(collection)
+    where = _combine_where(
+        _namespace_clause(namespace),
+        {"type": {"$eq": memory_type}} if memory_type else None,
+    )
     got = collection.get(where=where, include=["documents", "metadatas"])
     records = []
     for doc, meta, mid in zip(got["documents"], got["metadatas"], got["ids"]):
@@ -139,6 +203,7 @@ def export_all(memory_type: str | None = None) -> list[dict]:
         m = _metadata_to_memory(doc, meta, mid)
         records.append({
             "id": m.id,
+            "namespace": m.namespace,
             "content": m.content,
             "type": m.type,
             "created_at": m.created_at,
@@ -153,15 +218,22 @@ def export_all(memory_type: str | None = None) -> list[dict]:
     return sorted(records, key=lambda r: r["created_at"])
 
 
-def find_duplicates(threshold: float = 0.92, limit: int = 50) -> list[dict]:
-    """Report near-duplicate memory pairs by embedding cosine similarity.
+def find_duplicates(
+    threshold: float = 0.92,
+    limit: int = 50,
+    namespace: str | None = None,
+) -> list[dict]:
+    """Report near-duplicate memory pairs by embedding cosine similarity,
+    within one namespace (the same content in two namespaces is usually a
+    deliberate copy, not a duplicate).
 
     Report-only by design: the 2026-07-13 out-of-process dedup deleted
     high-salience memories, so candidates are surfaced for explicit per-id
     deletion rather than removed automatically.
     """
     collection = _get_collection()
-    got = collection.get(include=["documents", "metadatas"])
+    _ensure_namespace_backfill(collection)
+    got = collection.get(where=_namespace_clause(namespace), include=["documents", "metadatas"])
     ids = got["ids"]
     if len(ids) < 2:
         return []
@@ -286,18 +358,21 @@ def search(
     top_k: int = 5,
     types: list[str] | None = None,
     min_salience: float = 0.0,
+    namespace: str | None = None,
 ) -> list[SearchResult]:
     collection = _get_collection()
     if collection.count() == 0:
         return []
+    _ensure_namespace_backfill(collection)
 
     query_embedding = embed(query)
 
-    where = None
+    type_clause = None
     if types:
         valid = [t for t in types if t in MEMORY_TYPES]
         if valid:
-            where = {"type": {"$in": valid}}
+            type_clause = {"type": {"$in": valid}}
+    where = _combine_where(_namespace_clause(namespace), type_clause)
 
     # Over-fetch semantic candidates so the salience reranking below can promote
     # an important-but-slightly-less-similar memory above a top_k cutoff. Without
@@ -363,17 +438,26 @@ def get_related(memory_id: str, top_k: int = 5) -> list[SearchResult]:
     mem = get(memory_id)
     if not mem:
         return []
-    # Spread activation: search using the memory's own content as query
-    results = search(mem.content, top_k=top_k + 1)
+    # Spread activation: search using the memory's own content as query,
+    # within the memory's own namespace (not necessarily this process's).
+    results = search(mem.content, top_k=top_k + 1, namespace=mem.namespace)
     return [r for r in results if r.memory.id != memory_id][:top_k]
 
 
-def list_recent(memory_type: str | None = None, limit: int = 20) -> list[Memory]:
+def list_recent(
+    memory_type: str | None = None,
+    limit: int = 20,
+    namespace: str | None = None,
+) -> list[Memory]:
     collection = _get_collection()
     if collection.count() == 0:
         return []
+    _ensure_namespace_backfill(collection)
 
-    where = {"type": memory_type} if memory_type else None
+    where = _combine_where(
+        _namespace_clause(namespace),
+        {"type": {"$eq": memory_type}} if memory_type else None,
+    )
     result = collection.get(
         where=where,
         limit=limit,
@@ -398,5 +482,24 @@ def _increment_access(collection: chromadb.Collection, memory_id: str) -> None:
         pass
 
 
-def count() -> int:
-    return _get_collection().count()
+def count(namespace: str | None = "*") -> int:
+    collection = _get_collection()
+    clause = _namespace_clause(namespace)
+    if clause is None:
+        return collection.count()
+    _ensure_namespace_backfill(collection)
+    return len(collection.get(where=clause, include=[])["ids"])
+
+
+def list_namespaces() -> dict[str, int]:
+    """All namespaces present in the DB, with record counts."""
+    collection = _get_collection()
+    _ensure_namespace_backfill(collection)
+    got = collection.get(include=["metadatas"])
+    counts: dict[str, int] = {}
+    for meta in got["metadatas"]:
+        if meta is None:
+            continue
+        ns = meta.get("namespace", "default")
+        counts[ns] = counts.get(ns, 0) + 1
+    return dict(sorted(counts.items()))
