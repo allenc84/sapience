@@ -131,17 +131,26 @@ def check(db_path: Path = DB_PATH) -> dict:
     }
 
 
-def rebuild(db_path: Path = DB_PATH) -> dict:
+def rebuild(db_path: Path = DB_PATH, re_embed_all: bool = False) -> dict:
     """Rebuild the collection from intact metadata-store records and swap dirs.
 
     The old directory survives as <db_path>.corrupt-<timestamp>; nothing is
     deleted. Aborts (removing only its own partial output) if verification of
     the rebuilt collection fails.
+
+    re_embed_all discards every salvaged embedding and regenerates them with
+    the CURRENT provider — the migration path when switching
+    EMBEDDINGS_PROVIDER/EMBEDDINGS_MODEL, since dimensions differ between
+    providers and a collection can't mix them.
     """
     source = _open(db_path)
     records, dropped = _read_all(source)
     if not records:
         raise RuntimeError("No intact records found — refusing to rebuild to empty.")
+
+    if re_embed_all:
+        for r in records:
+            r["embedding"] = None
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
@@ -220,6 +229,12 @@ def cli() -> None:
         action="store_true",
         help="assert the MCP server is not running (required for --rebuild)",
     )
+    parser.add_argument(
+        "--re-embed",
+        action="store_true",
+        help="regenerate ALL embeddings with the current provider "
+             "(use when switching EMBEDDINGS_PROVIDER/EMBEDDINGS_MODEL)",
+    )
     args = parser.parse_args()
 
     if args.check:
@@ -234,7 +249,7 @@ def cli() -> None:
             "server is up. Stop the server (quit Claude Code sessions using it), "
             "then re-run with --server-stopped."
         )
-    result = rebuild()
+    result = rebuild(re_embed_all=args.re_embed)
     for k, v in result.items():
         print(f"{k}: {v}")
 

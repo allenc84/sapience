@@ -32,7 +32,7 @@ Memory types: `episodic` (events/decisions), `semantic` (patterns, written by co
 
 ### Privacy — read this precisely
 
-Your data is stored **locally** (vector DB + SQLite on your machine; no hosted account). But Sapience is **not** fully local compute: memory **content is sent to OpenAI** to create embeddings, and **selected memories are sent to Anthropic** for briefs, consolidation, and calibration. If that tradeoff doesn't work for your data, don't point Sapience at it.
+Your data is stored **locally** (vector DB + SQLite on your machine; no hosted account). By default Sapience is **not** fully local compute: memory **content is sent to OpenAI** to create embeddings, and **selected memories are sent to Anthropic** for briefs, consolidation, and calibration. Embeddings can be made fully local with `EMBEDDINGS_PROVIDER=local` (a bundled MiniLM model — no key, no network after the first model download); briefs/consolidation/calibration narratives still require Anthropic. If that tradeoff doesn't work for your data, don't point Sapience at it.
 
 ## Tools
 
@@ -64,7 +64,14 @@ ANTHROPIC_API_KEY=sk-ant-...
 LEDGER_DOMAINS="predictions,decisions,commitments" # your judgment domains
 SAPIENCE_DATA_DIR=/absolute/path/to/data           # defaults to a per-user OS dir
 SAPIENCE_NAMESPACE=work                            # memory namespace (default: "default")
+EMBEDDINGS_PROVIDER=openai                         # or "local" (bundled MiniLM, no key needed)
+EMBEDDINGS_MODEL=text-embedding-3-small            # OpenAI model when provider is openai
 ```
+
+> **Switching embedding providers** on an existing database requires re-embedding everything (dimensions differ). With the server stopped:
+> ```
+> EMBEDDINGS_PROVIDER=local python -m sapience.repair --rebuild --re-embed --server-stopped
+> ```
 
 ### Namespaces
 

@@ -6,9 +6,10 @@ filterable by date and score. Calibration outputs still flow through memory_stor
 into ChromaDB as high-salience feedback memories.
 """
 
+import re
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 import os
@@ -209,6 +210,50 @@ def get_by_id(assessment_id: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
+# Bands with fewer binary resolutions than this are flagged unreliable —
+# a 2-sample band that "hit 100%" is noise, not calibration.
+MIN_BAND_N = 5
+
+_HORIZON_RE = re.compile(r"(\d+)\s*(day|week|month)")
+
+
+def _wilson_ci(successes: float, n: int, z: float = 1.96) -> list[float]:
+    """95% Wilson score interval for a binomial rate — behaves sanely at the
+    small n this ledger lives at, unlike the normal approximation."""
+    if n == 0:
+        return [0.0, 1.0]
+    phat = successes / n
+    denom = 1 + z * z / n
+    center = (phat + z * z / (2 * n)) / denom
+    margin = z * ((phat * (1 - phat) / n + z * z / (4 * n * n)) ** 0.5) / denom
+    return [round(max(0.0, center - margin), 3), round(min(1.0, center + margin), 3)]
+
+
+def _horizon_deadline(date_made: str, horizon: str) -> Optional[datetime]:
+    m = _HORIZON_RE.search((horizon or "").lower())
+    if not m:
+        return None
+    try:
+        made = datetime.fromisoformat(date_made)
+    except (ValueError, TypeError):
+        return None
+    qty, unit = int(m.group(1)), m.group(2)
+    days = qty if unit == "day" else qty * 7 if unit == "week" else qty * 30
+    return made + timedelta(days=days)
+
+
+def overdue_unresolved_count(domain: Optional[str] = None) -> int:
+    """Pending assessments whose horizon has passed. These are the calibration
+    inflater: people resolve their wins and let losses sit unresolved."""
+    now = datetime.now(timezone.utc)
+    count = 0
+    for item in list_pending(domain=domain, limit=1000):
+        deadline = _horizon_deadline(item.get("date_made", ""), item.get("horizon", ""))
+        if deadline is not None and now > deadline:
+            count += 1
+    return count
+
+
 def calibration(domain: Optional[str] = None) -> dict:
     """Quantitative calibration over resolved assessments that have both a
     probability and a score.
@@ -239,10 +284,16 @@ def calibration(domain: Optional[str] = None) -> dict:
     scored = [(float(r["probability"]), r["score"]) for r in rows]
     pairs = [(p, 1.0 if s == 1 else 0.0) for p, s in scored if s != 0]
     n = len(pairs)
+    # Selective resolution inflates calibration: wins get scored, losses sit
+    # pending past their horizon. Surface that denominator explicitly.
+    overdue = overdue_unresolved_count(domain)
     result = {
         "n": n,
         "n_partial_excluded": len(scored) - n,
         "pending": pending,
+        "overdue_unresolved": overdue,
+        "resolution_rate": round(len(scored) / (len(scored) + overdue), 3)
+                           if (len(scored) + overdue) else None,
         "sufficient": n >= MIN_CALIBRATION_N,
         "min_n": MIN_CALIBRATION_N,
     }
@@ -260,13 +311,18 @@ def calibration(domain: Optional[str] = None) -> dict:
     for lo, hi, label in [(0.0, 0.65, "low"), (0.65, 0.85, "moderate"), (0.85, 1.01, "high")]:
         b = [(p, o) for p, o in pairs if lo <= p < hi]
         if b:
+            wins = sum(o for _, o in b)
             buckets.append({
                 "band": label,
                 "n": len(b),
                 "avg_confidence": round(sum(p for p, _ in b) / len(b), 3),
-                "observed_rate": round(sum(o for _, o in b) / len(b), 3),
+                "observed_rate": round(wins / len(b), 3),
+                "observed_rate_ci95": _wilson_ci(wins, len(b)),
+                # Below MIN_BAND_N a band's rate is an anecdote, not a signal.
+                "reliable": len(b) >= MIN_BAND_N,
             })
 
+    wins_total = sum(o for _, o in pairs)
     result.update({
         "brier": round(brier, 4),
         "baseline_brier": round(baseline, 4),
@@ -274,8 +330,11 @@ def calibration(domain: Optional[str] = None) -> dict:
         "hit_rate": round(sum(1 for _, o in pairs if o == 1.0) / n, 3),
         "avg_confidence": round(mean_conf, 3),
         "observed_rate": round(mean_outcome, 3),
-        "overconfident": (mean_conf - mean_outcome) > 0.1,
-        "underconfident": (mean_outcome - mean_conf) > 0.1,
+        "observed_rate_ci95": _wilson_ci(wins_total, n),
+        # Over/underconfidence is only claimed when the CI actually excludes
+        # the average forecast — a wide small-n interval stays agnostic.
+        "overconfident": (mean_conf - mean_outcome) > 0.1 and _wilson_ci(wins_total, n)[1] < mean_conf,
+        "underconfident": (mean_outcome - mean_conf) > 0.1 and _wilson_ci(wins_total, n)[0] > mean_conf,
         "buckets": buckets,
     })
     return result

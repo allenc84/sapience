@@ -33,7 +33,9 @@ def _calibration_numbers_block(cal: dict) -> str:
         f"{'met' if cal['sufficient'] else 'NOT met, treat as reflection'})",
         f"Brier score: {cal['brier']} (base-rate baseline {cal['baseline_brier']}; "
         f"{'beats' if cal['beats_baseline'] else 'does NOT beat'} baseline — lower is better)",
-        f"Avg forecast: {cal['avg_confidence']}  vs  observed hit rate: {cal['observed_rate']}",
+        f"Avg forecast: {cal['avg_confidence']}  vs  observed hit rate: {cal['observed_rate']}"
+        + (f" (95% CI {cal['observed_rate_ci95'][0]}–{cal['observed_rate_ci95'][1]})"
+           if cal.get("observed_rate_ci95") else ""),
     ]
     if cal.get("n_partial_excluded"):
         lines.append(f"Partial resolutions excluded from scoring: {cal['n_partial_excluded']}")
@@ -42,12 +44,23 @@ def _calibration_numbers_block(cal: dict) -> str:
             f"Unresolved (pending) forecasts: {cal['pending']} — calibration covers only "
             f"what was resolved; unresolved misses would change these numbers."
         )
+    if cal.get("overdue_unresolved"):
+        lines.append(
+            f"WARNING — {cal['overdue_unresolved']} forecasts are past their horizon but unscored "
+            f"(resolution rate {cal.get('resolution_rate')}). Selective resolution inflates "
+            f"calibration: wins get scored, losses sit. Treat the hit rate as an upper bound."
+        )
     if cal.get("overconfident"):
-        lines.append("Signal: OVERCONFIDENT (forecasts exceed outcomes by >10pts)")
+        lines.append("Signal: OVERCONFIDENT (forecasts exceed outcomes by >10pts; CI excludes the forecast)")
     elif cal.get("underconfident"):
-        lines.append("Signal: UNDERCONFIDENT (outcomes exceed forecasts by >10pts)")
+        lines.append("Signal: UNDERCONFIDENT (outcomes exceed forecasts by >10pts; CI excludes the forecast)")
     for b in cal.get("buckets", []):
-        lines.append(f"  {b['band']} band: n={b['n']}, avg forecast {b['avg_confidence']} → observed {b['observed_rate']}")
+        ci = b.get("observed_rate_ci95", ["?", "?"])
+        lines.append(
+            f"  {b['band']} band: n={b['n']}, avg forecast {b['avg_confidence']} → observed "
+            f"{b['observed_rate']} (CI {ci[0]}–{ci[1]})"
+            + ("" if b.get("reliable") else " [UNRELIABLE: below minimum band sample, treat as anecdote]")
+        )
     return "\n".join(lines)
 
 
