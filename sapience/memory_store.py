@@ -82,6 +82,127 @@ def save(
     return mid
 
 
+def update(
+    memory_id: str,
+    content: str | None = None,
+    memory_type: str | None = None,
+    salience: float | None = None,
+    topic: str | None = None,
+) -> Optional[Memory]:
+    """Edit a memory in place, preserving id, created_at, and access history.
+
+    Only the fields passed are changed; content changes trigger re-embedding.
+    Returns the updated Memory, or None if the id doesn't exist.
+    """
+    if memory_type is not None and memory_type not in MEMORY_TYPES:
+        raise ValueError(f"Invalid memory type '{memory_type}'. Must be one of: {MEMORY_TYPES}")
+    if salience is not None and not 0.0 <= salience <= 1.0:
+        raise ValueError(f"salience must be between 0.0 and 1.0, got {salience}")
+
+    collection = _get_collection()
+    existing = collection.get(ids=[memory_id], include=["documents", "metadatas"])
+    if not existing["ids"]:
+        return None
+
+    meta = existing["metadatas"][0].copy()
+    if memory_type is not None:
+        meta["type"] = memory_type
+    if salience is not None:
+        meta["salience"] = salience
+    if topic is not None:
+        meta["topic"] = topic
+    meta["updated_at"] = _now()
+
+    kwargs = {"ids": [memory_id], "metadatas": [meta]}
+    new_doc = existing["documents"][0]
+    if content is not None:
+        new_doc = content
+        kwargs["documents"] = [content]
+        kwargs["embeddings"] = [embed(content)]
+    collection.update(**kwargs)
+    return _metadata_to_memory(new_doc, meta, memory_id)
+
+
+def export_all(memory_type: str | None = None) -> list[dict]:
+    """Return every memory (optionally one type) as plain dicts for export.
+
+    Embeddings are deliberately excluded — they are recomputable, and their
+    bulk read path is the one that fails on a corrupted vector segment.
+    """
+    collection = _get_collection()
+    where = {"type": memory_type} if memory_type else None
+    got = collection.get(where=where, include=["documents", "metadatas"])
+    records = []
+    for doc, meta, mid in zip(got["documents"], got["metadatas"], got["ids"]):
+        if doc is None or meta is None:
+            continue
+        m = _metadata_to_memory(doc, meta, mid)
+        records.append({
+            "id": m.id,
+            "content": m.content,
+            "type": m.type,
+            "created_at": m.created_at,
+            "salience": m.salience,
+            "source": m.source,
+            "topic": m.topic,
+            "access_count": m.access_count,
+            "last_accessed": m.last_accessed,
+            "related_ids": m.related_ids,
+            "metadata": m.metadata,
+        })
+    return sorted(records, key=lambda r: r["created_at"])
+
+
+def find_duplicates(threshold: float = 0.92, limit: int = 50) -> list[dict]:
+    """Report near-duplicate memory pairs by embedding cosine similarity.
+
+    Report-only by design: the 2026-07-13 out-of-process dedup deleted
+    high-salience memories, so candidates are surfaced for explicit per-id
+    deletion rather than removed automatically.
+    """
+    collection = _get_collection()
+    got = collection.get(include=["documents", "metadatas"])
+    ids = got["ids"]
+    if len(ids) < 2:
+        return []
+    embeddings = _get_embeddings_by_id(collection, ids)
+    by_id = {
+        mid: _metadata_to_memory(doc, meta, mid)
+        for doc, meta, mid in zip(got["documents"], got["metadatas"], ids)
+        if doc is not None and meta is not None and mid in embeddings
+    }
+
+    import numpy as np
+    kept = list(by_id)
+    mat = np.array([embeddings[mid] for mid in kept], dtype=np.float64)
+    norms = np.linalg.norm(mat, axis=1)
+    norms[norms == 0] = 1.0
+    mat /= norms[:, None]
+    sims = mat @ mat.T
+
+    pairs = []
+    for i in range(len(kept)):
+        for j in range(i + 1, len(kept)):
+            if sims[i, j] >= threshold:
+                pairs.append((float(sims[i, j]), kept[i], kept[j]))
+    pairs.sort(reverse=True)
+
+    def _summary(m: Memory) -> dict:
+        return {
+            "id": m.id,
+            "type": m.type,
+            "topic": m.topic,
+            "salience": m.salience,
+            "created_at": m.created_at[:10],
+            "content_preview": m.content[:200],
+        }
+
+    return [
+        {"similarity": round(sim, 4), "a": _summary(by_id[a]), "b": _summary(by_id[b])}
+        for sim, a, b in pairs[:limit]
+    ]
+
+
 def delete(memory_id: str) -> bool:
     """Delete a single memory by id. Returns True if it existed."""
     collection = _get_collection()

@@ -38,6 +38,8 @@ Your data is stored **locally** (vector DB + SQLite on your machine; no hosted a
 
 **Memory** — `search_memory`, `save_memory`, `get_context_brief`, `get_related`, `consolidate`, `list_memories`, `memory_stats`
 
+**Memory admin** — `get_memory` (inspect by id), `edit_memory` (fix content/salience/topic/type in place, re-embeds automatically), `delete_memory`, `export_memories` (JSONL backup), `find_duplicate_memories` (report-only — nothing is auto-deleted)
+
 **Judgment ledger** — `log_assessment` (prefer a numeric `probability`), `list_pending_assessments`, `resolve_assessment`, `generate_calibration` (Brier + reliability, gated for sufficiency), `get_bias_map`
 
 ## Setup

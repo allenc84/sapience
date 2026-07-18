@@ -159,6 +159,104 @@ async def list_tools() -> list[types.Tool]:
             inputSchema={"type": "object", "properties": {}}
         ),
         types.Tool(
+            name="get_memory",
+            description=(
+                "Inspect a single memory by ID: full content plus all metadata "
+                "(type, topic, salience, timestamps, access history, source). "
+                "Use before editing or deleting to see exactly what's stored."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "memory_id": {"type": "string", "description": "Memory ID"}
+                },
+                "required": ["memory_id"]
+            }
+        ),
+        types.Tool(
+            name="edit_memory",
+            description=(
+                "Edit a memory in place — fix wrong content, adjust salience, retag topic, "
+                "or reclassify type. Only the fields you pass change; id, created_at, and "
+                "access history are preserved. Content changes are re-embedded automatically."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "memory_id": {"type": "string", "description": "Memory ID to edit"},
+                    "content": {"type": "string", "description": "Replacement content (full text, not a diff)"},
+                    "memory_type": {
+                        "type": "string",
+                        "description": f"New type. One of: {sorted(MEMORY_TYPES)}",
+                        "enum": sorted(MEMORY_TYPES)
+                    },
+                    "salience": {"type": "number", "description": "New importance weight 0.0–1.0"},
+                    "topic": {"type": "string", "description": "New topic tag"}
+                },
+                "required": ["memory_id"]
+            }
+        ),
+        types.Tool(
+            name="delete_memory",
+            description=(
+                "Permanently delete a single memory by ID. Irreversible — inspect it with "
+                "get_memory first, and confirm with the user before deleting anything "
+                "they didn't explicitly ask to remove."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "memory_id": {"type": "string", "description": "Memory ID to delete"}
+                },
+                "required": ["memory_id"]
+            }
+        ),
+        types.Tool(
+            name="export_memories",
+            description=(
+                "Export memories to a JSONL file (one memory per line, embeddings excluded). "
+                "Use for backup before risky operations, or to move memories between machines."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Output file path. Defaults to exports/memories-<timestamp>.jsonl in the data dir."
+                    },
+                    "memory_type": {
+                        "type": "string",
+                        "description": f"Export only this type. One of: {sorted(MEMORY_TYPES)}. Omit for all.",
+                        "enum": sorted(MEMORY_TYPES)
+                    }
+                }
+            }
+        ),
+        types.Tool(
+            name="find_duplicate_memories",
+            description=(
+                "Report near-duplicate memory pairs by embedding similarity. Report-only: "
+                "nothing is deleted. Review the pairs, then remove specific losers with "
+                "delete_memory after confirming with the user — prefer deleting the "
+                "lower-salience or older duplicate."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "threshold": {
+                        "type": "number",
+                        "description": "Minimum cosine similarity to flag a pair (default 0.92)",
+                        "default": 0.92
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max pairs to return (default 50)",
+                        "default": 50
+                    }
+                }
+            }
+        ),
+        types.Tool(
             name="log_assessment",
             description=(
                 "Log a forward-looking assessment to the judgment ledger. "
@@ -442,6 +540,98 @@ Be specific. These will be used to develop the user's thinking, not just summari
                 "total": total,
                 "by_type": by_type,
             }))]
+
+        elif name == "get_memory":
+            mem = memory_store.get(arguments["memory_id"])
+            if not mem:
+                return [types.TextContent(type="text", text=json.dumps(
+                    {"error": f"Memory {arguments['memory_id']} not found"}
+                ))]
+            return [types.TextContent(type="text", text=json.dumps({
+                "id": mem.id,
+                "type": mem.type,
+                "topic": mem.topic,
+                "salience": mem.salience,
+                "source": mem.source,
+                "created_at": mem.created_at,
+                "access_count": mem.access_count,
+                "last_accessed": mem.last_accessed,
+                "related_ids": mem.related_ids,
+                "metadata": mem.metadata,
+                "content": mem.content,
+            }, indent=2))]
+
+        elif name == "edit_memory":
+            fields = {k: arguments.get(k) for k in ("content", "memory_type", "salience", "topic")}
+            if all(v is None for v in fields.values()):
+                return [types.TextContent(type="text", text=json.dumps(
+                    {"error": "Pass at least one of: content, memory_type, salience, topic"}
+                ))]
+            mem = memory_store.update(memory_id=arguments["memory_id"], **fields)
+            if not mem:
+                return [types.TextContent(type="text", text=json.dumps(
+                    {"error": f"Memory {arguments['memory_id']} not found"}
+                ))]
+            return [types.TextContent(type="text", text=json.dumps({
+                "id": mem.id,
+                "status": "updated",
+                "changed": [k for k, v in fields.items() if v is not None],
+                "type": mem.type,
+                "topic": mem.topic,
+                "salience": mem.salience,
+                "content_preview": mem.content[:200],
+            }, indent=2))]
+
+        elif name == "delete_memory":
+            mid = arguments["memory_id"]
+            mem = memory_store.get(mid)
+            if not mem:
+                return [types.TextContent(type="text", text=json.dumps(
+                    {"error": f"Memory {mid} not found"}
+                ))]
+            memory_store.delete(mid)
+            return [types.TextContent(type="text", text=json.dumps({
+                "id": mid,
+                "status": "deleted",
+                "was": {
+                    "type": mem.type,
+                    "topic": mem.topic,
+                    "salience": mem.salience,
+                    "created_at": mem.created_at[:10],
+                    "content_preview": mem.content[:200],
+                },
+            }, indent=2))]
+
+        elif name == "export_memories":
+            from datetime import datetime, timezone
+            from pathlib import Path
+            from .paths import data_dir
+            records = memory_store.export_all(memory_type=arguments.get("memory_type"))
+            if arguments.get("path"):
+                out_path = Path(arguments["path"]).expanduser()
+            else:
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+                out_path = data_dir() / "exports" / f"memories-{stamp}.jsonl"
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "w") as f:
+                for r in records:
+                    f.write(json.dumps(r) + "\n")
+            return [types.TextContent(type="text", text=json.dumps({
+                "status": "exported",
+                "count": len(records),
+                "path": str(out_path),
+            }))]
+
+        elif name == "find_duplicate_memories":
+            pairs = memory_store.find_duplicates(
+                threshold=arguments.get("threshold", 0.92),
+                limit=arguments.get("limit", 50),
+            )
+            return [types.TextContent(type="text", text=json.dumps({
+                "pairs_found": len(pairs),
+                "note": "Report-only. Delete specific ids with delete_memory after user confirmation.",
+                "pairs": pairs,
+            }, indent=2))]
 
         elif name == "log_assessment":
             aid = ledger.log_assessment(
