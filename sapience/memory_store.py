@@ -107,6 +107,59 @@ def delete_where(where: dict) -> int:
     return len(ids)
 
 
+def _get_embeddings_by_id(collection: chromadb.Collection, ids: list[str]) -> dict:
+    """Fetch embeddings for ids, tolerating vector-segment corruption.
+
+    Tries one batched get; if the segment is drifted that can fail wholesale
+    ("Error finding id"), so fall back to per-id gets and skip only the ids
+    that are individually unreadable."""
+    try:
+        got = collection.get(ids=ids, include=["embeddings"])
+        embs = got.get("embeddings")
+        if embs is not None:
+            return {
+                mid: list(emb)
+                for mid, emb in zip(got["ids"], embs)
+                if emb is not None
+            }
+    except Exception:
+        pass
+    out = {}
+    for mid in ids:
+        try:
+            got = collection.get(ids=[mid], include=["embeddings"])
+            embs = got.get("embeddings")
+            if got["ids"] and embs is not None and embs[0] is not None:
+                out[mid] = list(embs[0])
+        except Exception:
+            continue
+    return out
+
+
+def _scan_all(
+    collection: chromadb.Collection,
+    query_embedding: list[float],
+    where: dict | None,
+) -> list[tuple]:
+    """HNSW-independent search: read every record from the metadata store and
+    rank by cosine similarity computed client-side. documents/metadatas come
+    from sqlite and survive index corruption; embeddings are salvaged per-id."""
+    got = collection.get(where=where, include=["documents", "metadatas"])
+    if not got["ids"]:
+        return []
+    embeddings = _get_embeddings_by_id(collection, got["ids"])
+    q_norm = sum(x * x for x in query_embedding) ** 0.5 or 1.0
+    candidates = []
+    for doc, meta, mid in zip(got["documents"], got["metadatas"], got["ids"]):
+        emb = embeddings.get(mid)
+        if doc is None or meta is None or emb is None:
+            continue
+        dot = sum(a * b for a, b in zip(query_embedding, emb))
+        e_norm = sum(x * x for x in emb) ** 0.5 or 1.0
+        candidates.append((doc, meta, dot / (q_norm * e_norm), mid))
+    return candidates
+
+
 def search(
     query: str,
     top_k: int = 5,
@@ -129,26 +182,37 @@ def search(
     # an important-but-slightly-less-similar memory above a top_k cutoff. Without
     # this, salience could only reorder within the first top_k by pure similarity.
     fetch_n = min(max(top_k * 5, top_k), collection.count())
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=fetch_n,
-        where=where,
-        include=["documents", "metadatas", "distances"],
-    )
+    try:
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=fetch_n,
+            where=where,
+            include=["documents", "metadatas", "distances"],
+        )
+        candidates = [
+            (doc, meta, 1.0 - dist, mid)   # cosine distance → similarity
+            for doc, meta, dist, mid in zip(
+                results["documents"][0],
+                results["metadatas"][0],
+                results["distances"][0],
+                results["ids"][0],
+            )
+        ]
+    except Exception:
+        # The HNSW index can drift from the metadata store when the DB dir is
+        # mutated by a second process (2026-07-14 ghost-index incident); Chroma
+        # then fails internally ("Error finding id"), especially on where-filtered
+        # queries. The metadata store itself survives, so fall back to scanning it
+        # and ranking client-side. Personal-scale collections make this cheap.
+        candidates = _scan_all(collection, query_embedding, where)
 
     output = []
-    for doc, meta, dist, mid in zip(
-        results["documents"][0],
-        results["metadatas"][0],
-        results["distances"][0],
-        results["ids"][0],
-    ):
+    for doc, meta, score, mid in candidates:
         # A deleted record can linger in the HNSW index (e.g. deletes issued from
         # another process) and come back with None doc/metadata — skip it rather
         # than crash the whole search.
         if doc is None or meta is None:
             continue
-        score = 1.0 - dist   # cosine distance → similarity
         mem = _metadata_to_memory(doc, meta, mid)
         if mem.salience >= min_salience:
             output.append(SearchResult(memory=mem, score=score))
