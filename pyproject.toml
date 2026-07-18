@@ -27,6 +27,8 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 sapience = "sapience.server:cli"
+sapience-weekly-review = "sapience.weekly_review:main"
+sapience-consolidate = "sapience.consolidator:main"
 
 [project.urls]
 Homepage = "https://github.com/allenc84/sapience"

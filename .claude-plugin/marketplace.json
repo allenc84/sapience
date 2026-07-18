@@ -1,0 +1,17 @@
+{
+  "name": "sapience",
+  "description": "Sapience — human-like memory and a judgment ledger for AI",
+  "owner": { "name": "Allen Chen" },
+  "plugins": [
+    {
+      "name": "sapience",
+      "source": "./plugin",
+      "description": "Persistent semantic memory that compounds across sessions, plus a judgment ledger with real calibration (Brier scores, bias maps). Requires uv and OPENAI_API_KEY + ANTHROPIC_API_KEY.",
+      "author": { "name": "Allen Chen" },
+      "homepage": "https://github.com/allenc84/sapience",
+      "repository": "https://github.com/allenc84/sapience",
+      "license": "MIT",
+      "keywords": ["memory", "mcp", "judgment-ledger", "calibration", "ai-memory"]
+    }
+  ]
+}

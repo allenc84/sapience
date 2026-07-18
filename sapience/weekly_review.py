@@ -15,10 +15,6 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import memory_store
-from . import ledger
-from . import resolver
-
 from .paths import data_dir
 
 STATE_FILE = data_dir() / ".weekly_review_state.json"
@@ -86,6 +82,10 @@ def run() -> dict:
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return {"status": "error", "reason": "no API key"}
+
+    # Deferred so the not-due path above stays cheap — this runs from a Stop
+    # hook after every response, and chromadb imports cost seconds.
+    from . import memory_store, ledger, resolver
 
     now_str = datetime.now(timezone.utc).isoformat()
     pending = ledger.list_pending()
@@ -166,6 +166,10 @@ def run() -> dict:
     }
 
 
+def main():
+    """Console-script entry point (`sapience-weekly-review`)."""
+    print(json.dumps(run(), indent=2))
+
+
 if __name__ == "__main__":
-    result = run()
-    print(json.dumps(result, indent=2))
+    main()

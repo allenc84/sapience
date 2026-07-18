@@ -1,0 +1,10 @@
+{
+  "name": "sapience",
+  "displayName": "Sapience",
+  "description": "Human-like memory and a judgment ledger for AI — persistent semantic memory that compounds across sessions, plus calibration and bias maps for your own predictions. Requires uv (https://docs.astral.sh/uv/) and OPENAI_API_KEY + ANTHROPIC_API_KEY in your environment.",
+  "author": { "name": "Allen Chen" },
+  "homepage": "https://github.com/allenc84/sapience",
+  "repository": "https://github.com/allenc84/sapience",
+  "license": "MIT",
+  "keywords": ["memory", "mcp", "judgment-ledger", "calibration", "ai-memory"]
+}

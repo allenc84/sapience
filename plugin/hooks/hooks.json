@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uvx --from git+https://github.com/allenc84/sapience sapience-weekly-review >/dev/null 2>&1 &"
+          }
+        ]
+      }
+    ]
+  }
+}

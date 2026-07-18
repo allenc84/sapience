@@ -149,6 +149,10 @@ def run(days_back: int = 7) -> dict:
     }
 
 
+def main():
+    """Console-script entry point (`sapience-consolidate`)."""
+    print(json.dumps(run(), indent=2))
+
+
 if __name__ == "__main__":
-    result = run()
-    print(json.dumps(result, indent=2))
+    main()

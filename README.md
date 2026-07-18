@@ -70,7 +70,18 @@ SAPIENCE_DATA_DIR=/absolute/path/to/data           # defaults to a per-user OS d
 > security add-generic-password -U -s "OPENAI_API_KEY" -a "claude-memory" -w 'sk-proj-...'
 > ```
 
-### Wire into Claude Code
+### Install as a Claude Code plugin (easiest)
+
+With [uv](https://docs.astral.sh/uv/) installed and `OPENAI_API_KEY` + `ANTHROPIC_API_KEY` in your environment:
+
+```
+/plugin marketplace add allenc84/sapience
+/plugin install sapience@sapience
+```
+
+This wires up everything below in one step: the MCP server (launched via `uvx`, no manual install), the `/sapience:log` judgment-ledger command, and a session-stop hook that runs the weekly ledger review (self-gated to once every 6 days). Configuration still comes from your environment — set `MEMORY_USER_CONTEXT`, `LEDGER_DOMAINS`, or `SAPIENCE_DATA_DIR` there if you want non-defaults.
+
+### Wire into Claude Code manually
 
 Add to your MCP config (`~/.claude.json` or project `.mcp.json`):
 
