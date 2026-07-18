@@ -121,6 +121,16 @@ Restart Claude Code. The server reads keys and config at launch — restart afte
 - `run_consolidate.sh` — nightly: extract semantic patterns from recent episodes (cron/launchd).
 - `run_weekly_review.sh` — weekly ledger review; designed for a Claude Code Stop hook.
 
+## Try it on demo data
+
+Don't want to point Sapience at real data yet? Seed a fictional founder's dataset — 21 memories and a 30-call judgment ledger with a real calibration story for the bias map to find (overconfident on product bets, calibrated on hiring, underconfident on growth):
+
+```bash
+OPENAI_API_KEY=... sapience-demo --dir ./sapience-demo-data
+```
+
+It prints the MCP config to paste, plus a 4-step demo flow. Everything is fictional; the target directory must be new or empty.
+
 ## Migrating existing markdown memories
 
 ```bash

@@ -4,12 +4,21 @@ Embeddings are faked (deterministic, keyless) so these run in CI without
 OPENAI_API_KEY and without network access.
 """
 
+import hashlib
+
 import pytest
 
 
 def fake_embed(text: str) -> list[float]:
-    """Deterministic 8-dim embedding: similar prefixes → similar vectors."""
-    seed = [float((hash(text[:12]) >> (4 * i)) % 97) for i in range(8)]
+    """Deterministic 8-dim embedding: identical prefixes → identical vectors.
+
+    Uses md5, not hash() — built-in hash is randomized per process
+    (PYTHONHASHSEED), which made rankings flake across runs. Components are
+    centered so unrelated texts get near-zero cosine similarity instead of
+    crowding the positive orthant.
+    """
+    digest = hashlib.md5(text[:12].encode()).digest()
+    seed = [b - 127.5 for b in digest[:8]]
     norm = sum(x * x for x in seed) ** 0.5 or 1.0
     return [x / norm for x in seed]
 
