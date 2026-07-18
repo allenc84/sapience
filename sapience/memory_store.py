@@ -139,6 +139,62 @@ def save(
     return mid
 
 
+def upsert(
+    content: str,
+    memory_type: str,
+    memory_id: str,
+    salience: float = 0.5,
+    source: str = "manual",
+    topic: str = "",
+    related_ids: list[str] | None = None,
+    metadata: dict | None = None,
+    namespace: str | None = None,
+) -> str:
+    """Write a memory at a known id, replacing atomically if it exists.
+
+    Unlike delete-then-save, a failure anywhere here (embedding, API, crash)
+    leaves the existing record fully intact — there is no window where the
+    old version is gone and the new one isn't written. created_at and access
+    history survive replacement; updated_at records the rewrite.
+    """
+    if memory_type not in MEMORY_TYPES:
+        raise ValueError(f"Invalid memory type '{memory_type}'. Must be one of: {MEMORY_TYPES}")
+    ns = namespace or DEFAULT_NAMESPACE
+    if ns == "*":
+        raise ValueError("namespace '*' is a read-side wildcard; upserts need a concrete namespace")
+
+    collection = _get_collection()
+    now = _now()
+    created_at, access_count, last_accessed = now, 0, None
+    existing = collection.get(ids=[memory_id], include=["metadatas"])
+    if existing["ids"] and existing["metadatas"][0] is not None:
+        old = existing["metadatas"][0]
+        created_at = old.get("created_at", now)
+        access_count = int(old.get("access_count", 0))
+        last_accessed = old.get("last_accessed")
+
+    # Embed before touching the collection so an embedding failure can't
+    # leave a half-written record.
+    embedding = embed(content)
+
+    meta = {
+        "namespace": ns,
+        "type": memory_type,
+        "salience": salience,
+        "source": source,
+        "topic": topic,
+        "created_at": created_at,
+        "updated_at": now,
+        "access_count": access_count,
+        "related_ids": json.dumps(related_ids or []),
+        "extra_metadata": json.dumps(metadata or {}),
+    }
+    if last_accessed:
+        meta["last_accessed"] = last_accessed
+    collection.upsert(ids=[memory_id], embeddings=[embedding], documents=[content], metadatas=[meta])
+    return memory_id
+
+
 def update(
     memory_id: str,
     content: str | None = None,
