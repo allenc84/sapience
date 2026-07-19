@@ -7,7 +7,7 @@ vector with the current provider.
 
 import pytest
 
-from test_memory_store import fake_embed, store  # noqa: F401  (fixture reuse)
+from tests.test_memory_store import fake_embed, store  # noqa: F401  (fixture reuse)
 
 
 class FakeLocalEF:

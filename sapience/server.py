@@ -712,6 +712,7 @@ Be specific. These will be used to develop the user's thinking, not just summari
 
             remaining = len(ledger.list_pending(domain=item["domain"]))
             resolved_count = ledger.resolved_count_for_domain(item["domain"])
+            binary_n = ledger.calibration(item["domain"])["n"]
             return [types.TextContent(type="text", text=json.dumps({
                 "status": "resolved",
                 "domain": item["domain"],
@@ -720,9 +721,10 @@ Be specific. These will be used to develop the user's thinking, not just summari
                 "total_resolved_in_domain": resolved_count,
                 "tip": (
                     f"Run generate_calibration(domain='{item['domain']}') — enough data for a quantitative read."
-                    if resolved_count >= ledger.MIN_CALIBRATION_N else
-                    f"generate_calibration works now but is reflection-only until {ledger.MIN_CALIBRATION_N} resolved "
-                    f"({ledger.MIN_CALIBRATION_N - resolved_count} to go) — below that, patterns are signals to watch, not conclusions."
+                    if binary_n >= ledger.MIN_CALIBRATION_N else
+                    f"generate_calibration works now but is reflection-only until {ledger.MIN_CALIBRATION_N} binary-scored "
+                    f"({ledger.MIN_CALIBRATION_N - binary_n} to go) — partial resolutions don't count toward this, and "
+                    "below the threshold patterns are signals to watch, not conclusions."
                 ),
             }, indent=2))]
 
@@ -730,10 +732,10 @@ Be specific. These will be used to develop the user's thinking, not just summari
             domain = arguments["domain"]
             result = resolver.generate_calibration(domain)
             if result is None:
-                count = ledger.resolved_count_for_domain(domain)
+                binary_n = ledger.calibration(domain)["n"]
                 return [types.TextContent(type="text", text=json.dumps({
                     "status": "insufficient_data",
-                    "resolved_count": count,
+                    "binary_scored_count": binary_n,
                     "needed": 3,
                 }))]
             return [types.TextContent(type="text", text=json.dumps(result, indent=2))]

@@ -104,7 +104,7 @@ def run() -> dict:
     # Run calibration for domains with sufficient resolved data
     calibrations = []
     for domain in sorted(ledger.DOMAINS):
-        if ledger.resolved_count_for_domain(domain) >= 3:
+        if ledger.calibration(domain)["n"] >= 3:
             try:
                 result = resolver.generate_calibration(domain)
                 if result:

@@ -7,7 +7,7 @@ OPENAI_API_KEY and without network access.
 
 import pytest
 
-from test_memory_store import fake_embed, store  # noqa: F401  (fixture reuse)
+from tests.test_memory_store import fake_embed, store  # noqa: F401  (fixture reuse)
 
 
 @pytest.fixture

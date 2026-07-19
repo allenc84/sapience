@@ -7,7 +7,7 @@ summary when a write fails, and forgetting insights older than the window.
 
 import pytest
 
-from test_memory_store import fake_embed, store  # noqa: F401  (fixture reuse)
+from tests.test_memory_store import fake_embed, store  # noqa: F401  (fixture reuse)
 
 
 @pytest.fixture

@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from test_memory_store import fake_embed, store, seed  # noqa: F401  (fixture reuse)
+from tests.test_memory_store import fake_embed, store, seed  # noqa: F401  (fixture reuse)
 
 
 def test_update_content_reembeds_and_preserves_identity(store):

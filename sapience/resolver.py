@@ -72,11 +72,11 @@ def generate_calibration(domain: str) -> Optional[dict]:
     ledger.MIN_CALIBRATION_N the result is flagged reflection-only; above it the
     numbers are worth acting on but are still evidence of a tendency, not proof.
     """
-    resolved = ledger.list_resolved(domain=domain, limit=100)
-    if len(resolved) < 3:
+    cal = ledger.calibration(domain)
+    if cal["n"] < 3:
         return None
 
-    cal = ledger.calibration(domain)
+    resolved = ledger.list_resolved(domain=domain, limit=100)
     numbers_block = _calibration_numbers_block(cal)
 
     assessment_text = "\n\n".join(
