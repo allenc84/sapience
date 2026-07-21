@@ -2,7 +2,7 @@
   "mcpServers": {
     "sapience": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/allenc84/sapience", "sapience"]
+      "args": ["--from", "sapience-mcp==0.1.1", "sapience"]
     }
   }
 }

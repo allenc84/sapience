@@ -14,4 +14,4 @@ from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv(usecwd=True))
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sapience-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "Human-like memory and a judgment ledger for AI — an MCP server for Claude Code."
 readme = "README.md"
 requires-python = ">=3.12"

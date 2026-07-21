@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uvx --from git+https://github.com/allenc84/sapience sapience-weekly-review >/dev/null 2>&1 &"
+            "command": "uvx --from sapience-mcp==0.1.1 sapience-weekly-review >/dev/null 2>&1 &"
           }
         ]
       }
