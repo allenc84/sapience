@@ -5,7 +5,7 @@ partial outcomes corrupting the Brier baseline, a perfect 0.0 Brier rendering
 as "no data", and domain-filtered reports grounded in overall numbers.
 """
 
-from sapience.resolver import _calibration_numbers_block
+from sapience.resolver import _calibration_numbers_block, generate_calibration
 
 
 def _log_resolved(ledger, domain, probability, score):
@@ -27,6 +27,19 @@ def test_partials_excluded_from_brier(ledger):
     assert cal["brier"] == round((0.04 + 0.04 + 0.64) / 3, 4)
     # Base rate 2/3 -> baseline 2/9, from binary outcomes only
     assert cal["baseline_brier"] == round(2 / 9, 4)
+
+
+def test_generate_calibration_gates_on_binary_count_not_partials(ledger):
+    # Regression test for a bug where the readiness gate counted partial
+    # (score=0) resolutions as if they were scorable. Three partial-only
+    # resolutions must NOT be treated as "enough data" — that would trigger
+    # a real (paid) Claude API call with zero scorable outcomes behind it.
+    _log_resolved(ledger, "predictions", 0.7, 0)
+    _log_resolved(ledger, "predictions", 0.7, 0)
+    _log_resolved(ledger, "predictions", 0.7, 0)
+
+    assert ledger.calibration("predictions")["n"] == 0
+    assert generate_calibration("predictions") is None
 
 
 def test_constant_base_rate_forecast_does_not_beat_baseline(ledger):

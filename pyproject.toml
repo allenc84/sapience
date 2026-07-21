@@ -8,9 +8,16 @@ version = "0.1.0"
 description = "Human-like memory and a judgment ledger for AI — an MCP server for Claude Code."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "Allen Chen" }]
 keywords = ["mcp", "claude", "ai-memory", "judgment-ledger", "calibration", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "chromadb>=0.6.0",
     "openai>=1.56.0",
@@ -33,6 +40,8 @@ sapience-demo = "sapience.demo:main"
 
 [project.urls]
 Homepage = "https://github.com/allenc84/sapience"
+Source = "https://github.com/allenc84/sapience"
+Issues = "https://github.com/allenc84/sapience/issues"
 
 [tool.setuptools]
 packages = ["sapience"]

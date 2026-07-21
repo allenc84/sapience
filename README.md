@@ -19,7 +19,7 @@ This is the part you won't find in other memory tools. Every "AI memory" remembe
 2. **Resolve** it when the outcome is known (right / partial / wrong).
 3. **Calibrate.** Sapience computes a **Brier score** against a base-rate baseline, breaks accuracy down by confidence band, and flags over/under-confidence. A Claude-written narrative sits *on top of* the numbers — never instead of them.
 
-**Honesty by design:** below a sample threshold (20 resolved by default), Sapience refuses to call anything a "bias" and explicitly labels its output *"reflection, not statistics."* A bias is not a bias at n=3.
+**Honesty by design:** below a sample threshold (20 binary-scored resolutions by default — partial resolutions don't count), Sapience refuses to call anything a "bias" and explicitly labels its output *"reflection, not statistics."* A bias is not a bias at n=3.
 
 ## How the memory works
 
@@ -45,6 +45,18 @@ Your data is stored **locally** (vector DB + SQLite on your machine; no hosted a
 ## Setup
 
 Requires Python 3.12+.
+
+**Install from PyPI:**
+
+```bash
+pip install sapience-mcp
+```
+
+> The PyPI distribution is named `sapience-mcp` — PyPI's name-similarity rules blocked the bare `sapience` name — but everything else keeps the original name: `import sapience`, the installed command is `sapience`, and the four console scripts (`sapience`, `sapience-weekly-review`, `sapience-consolidate`, `sapience-demo`) are unchanged.
+
+Then create a `.env` in your project directory (variables below) or export them directly — Sapience picks up `.env` from your current working directory.
+
+**Or, from source (for development):**
 
 ```bash
 git clone https://github.com/allenc84/sapience.git

@@ -9,7 +9,7 @@ Usage:
 - `/sapience:log review` — show all pending assessments
 - `/sapience:log review <domain>` — show pending for one domain (one of your configured `LEDGER_DOMAINS`)
 - `/sapience:log resolve <id>` — score a specific assessment by ID
-- `/sapience:log calibration <domain>` — generate calibration pattern from resolved assessments in a domain (requires 3+ resolved)
+- `/sapience:log calibration <domain>` — generate calibration pattern from resolved assessments in a domain (requires 3+ binary-scored — partial resolutions don't count)
 - `/sapience:log bias` — generate cross-domain bias map
 
 ---
@@ -75,7 +75,7 @@ After the table, prompt: "To resolve any of these: `/sapience:log resolve <id>`"
 
 5. Confirm: "Resolved: [score label] — [outcome]"
 
-6. If the domain now has 3+ resolved assessments, suggest: "You now have enough data to run `/sapience:log calibration [domain]`"
+6. If the domain now has 3+ binary-scored assessments (partials don't count), suggest: "You now have enough data to run `/sapience:log calibration [domain]`"
 
 ---
 
