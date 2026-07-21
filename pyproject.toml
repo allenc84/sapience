@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sapience"
+name = "sapience-mcp"
 version = "0.1.0"
 description = "Human-like memory and a judgment ledger for AI — an MCP server for Claude Code."
 readme = "README.md"
