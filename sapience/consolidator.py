@@ -25,14 +25,14 @@ def _summary_id(namespace: str, topic: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"sapience-consolidation:{namespace}:{topic}"))
 
 
-def _prior_summaries(topic: str) -> list[Memory]:
-    """Existing consolidation summaries for a topic in this namespace, newest
+def _prior_summaries(topic: str, namespace: str) -> list[Memory]:
+    """Existing consolidation summaries for a topic in a namespace, newest
     first. More than one (or a non-deterministic id) means records from the
     old delete-then-save era that should be folded in and cleaned up."""
     collection = memory_store._get_collection()
     got = collection.get(
         where={"$and": [
-            {"namespace": {"$eq": memory_store.DEFAULT_NAMESPACE}},
+            {"namespace": {"$eq": namespace}},
             {"type": {"$eq": "semantic"}},
             {"source": {"$eq": "consolidation"}},
             {"topic": {"$eq": topic}},
@@ -129,11 +129,25 @@ Be specific and non-generic. These will be used to challenge and develop the use
     return extracted
 
 
-def run(days_back: int = 7) -> dict:
+def run(days_back: int = 7, namespace: str | None = None) -> dict:
+    """Consolidate one namespace (default: this process's), or every
+    namespace in the DB with namespace="*" — what the shared server does,
+    since it serves sessions from all projects."""
+    if namespace == "*":
+        per_ns = {ns: _run_namespace(days_back, ns) for ns in memory_store.list_namespaces()}
+        return {
+            "status": "complete",
+            "topics_consolidated": sum(r.get("topics_consolidated", 0) for r in per_ns.values()),
+            "namespaces": per_ns,
+        }
+    return _run_namespace(days_back, namespace or memory_store.DEFAULT_NAMESPACE)
+
+
+def _run_namespace(days_back: int, namespace: str) -> dict:
     cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
     cutoff_str = cutoff.isoformat()
 
-    recent = memory_store.list_recent(memory_type="episodic", limit=200)
+    recent = memory_store.list_recent(memory_type="episodic", limit=200, namespace=namespace)
     recent = [m for m in recent if m.created_at >= cutoff_str]
 
     if not recent:
@@ -150,7 +164,7 @@ def run(days_back: int = 7) -> dict:
         try:
             # Incremental: feed the accumulated summary back in, so insights
             # from episodes older than this window survive re-consolidation.
-            priors = _prior_summaries(topic)
+            priors = _prior_summaries(topic, namespace)
             prior = priors[0] if priors else None
             extracted = _extract_patterns(
                 topic, memories, prior_summary=prior.content if prior else None
@@ -185,7 +199,7 @@ def run(days_back: int = 7) -> dict:
             # Atomic: upsert at a deterministic per-topic id. A failure before
             # or during the write leaves the previous summary untouched —
             # there is no delete-then-save window.
-            sid = _summary_id(memory_store.DEFAULT_NAMESPACE, topic)
+            sid = _summary_id(namespace, topic)
             memory_store.upsert(
                 content=semantic_content,
                 memory_type="semantic",
@@ -194,6 +208,7 @@ def run(days_back: int = 7) -> dict:
                 source="consolidation",
                 topic=topic,
                 related_ids=all_related,
+                namespace=namespace,
                 metadata={
                     "days_back": days_back,
                     "episode_count": len(memories),

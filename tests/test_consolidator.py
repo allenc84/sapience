@@ -150,3 +150,43 @@ def test_migrates_old_random_id_summaries(consolidator, store, monkeypatch):  # 
     assert len(found) == 1
     assert found[0].id == consolidator._summary_id("default", "launch")
     assert store.get(old) is None, "legacy summary retired after successful upsert"
+
+
+def _seed_ns(store, ns, topic, n=2):  # noqa: F811
+    for i in range(n):
+        store.save(f"{ns} episode {i} about {topic}", "episodic",
+                   salience=0.6, topic=topic, namespace=ns)
+
+
+def _ns_summaries(store, ns):  # noqa: F811
+    return [m for m in store.list_recent(memory_type="semantic", limit=50, namespace=ns)
+            if m.source == "consolidation"]
+
+
+def test_wildcard_consolidates_every_namespace(consolidator, store, monkeypatch):  # noqa: F811
+    _seed_ns(store, "default", "launch")
+    _seed_ns(store, "acme", "hiring")
+    monkeypatch.setattr(consolidator, "_extract_patterns",
+                        lambda topic, memories, prior_summary=None: fake_extraction(topic))
+
+    result = consolidator.run(namespace="*")
+
+    assert result["topics_consolidated"] == 2
+    assert set(result["namespaces"]) == {"default", "acme"}
+    acme = _ns_summaries(store, "acme")
+    assert [m.topic for m in acme] == ["hiring"]
+    assert acme[0].id == consolidator._summary_id("acme", "hiring")
+    assert [m.topic for m in _ns_summaries(store, "default")] == ["launch"]
+
+
+def test_single_namespace_run_leaves_others_alone(consolidator, store, monkeypatch):  # noqa: F811
+    _seed_ns(store, "default", "launch")
+    _seed_ns(store, "acme", "hiring")
+    monkeypatch.setattr(consolidator, "_extract_patterns",
+                        lambda topic, memories, prior_summary=None: fake_extraction(topic))
+
+    result = consolidator.run(namespace="acme")
+
+    assert result["topics_consolidated"] == 1
+    assert len(_ns_summaries(store, "acme")) == 1
+    assert _ns_summaries(store, "default") == []

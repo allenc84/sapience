@@ -139,7 +139,7 @@ What each Claude Code session launches (`sapience`, `run_server.sh`, or `python 
 
 - is the only process that opens the DB, enforced by an exclusive lock (`chroma_db.lock`) — anything else that tries fails fast with `Another sapience process already owns ...` instead of corrupting the index;
 - binds to localhost only and is stateless, so sessions keep working across a server restart — if it dies, the next request from any session restarts it;
-- runs consolidation every 6 hours (`SAPIENCE_CONSOLIDATE_EVERY_S`) and checks whether the weekly ledger review is due every hour;
+- runs consolidation for every namespace every 6 hours (`SAPIENCE_CONSOLIDATE_EVERY_S`) and checks whether the weekly ledger review is due every hour;
 - logs to `server.log` in the data directory, and is replaced automatically when a relay from a different installed version connects. Per-project `SAPIENCE_NAMESPACE` still works: each relay applies its own namespace to its calls.
 
 Nothing to configure. If you'd rather keep the server under your own supervisor (launchd, systemd), run `sapience --http` there; relays will use it as-is. `sapience --direct` is the old in-process stdio server — single session only, since it holds the lock. Stop the server before `python -m sapience.repair --rebuild`; the lock refuses otherwise.
