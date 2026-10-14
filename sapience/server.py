@@ -798,13 +798,30 @@ def http_main(host: str, port: int):
     from starlette.routing import Mount
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-    memory_store.acquire_db_lock()
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+    from .proxy import _version
+
+    try:
+        memory_store.acquire_db_lock()
+    except RuntimeError as e:
+        # Lost a start-up race to another server: it serves everyone.
+        logging.info("not starting: %s", e)
+        return
     # Stateless: no per-session state, so tabs survive a server restart
-    # without reconnecting.
-    manager = StreamableHTTPSessionManager(app=app, stateless=True)
+    # without reconnecting. JSON responses keep the stdio relay simple.
+    manager = StreamableHTTPSessionManager(app=app, stateless=True, json_response=True)
 
     async def handle(scope, receive, send):
         await manager.handle_request(scope, receive, send)
+
+    async def health(_request):
+        return JSONResponse({
+            "service": "sapience",
+            "version": _version(),
+            "pid": os.getpid(),
+            "managed": os.environ.get("SAPIENCE_MANAGED") == "1",
+        })
 
     @contextlib.asynccontextmanager
     async def lifespan(_):
@@ -813,26 +830,36 @@ def http_main(host: str, port: int):
             yield
         jobs.cancel()
 
-    starlette_app = Starlette(routes=[Mount("/mcp", app=handle)], lifespan=lifespan)
+    starlette_app = Starlette(
+        routes=[Route("/health", health), Mount("/mcp", app=handle)], lifespan=lifespan
+    )
     uvicorn.run(starlette_app, host=host, port=port, log_level="warning")
 
 
 def cli():
     """Console-script entry point (`sapience`) and `python -m sapience.server`.
 
-    Default is stdio (one server per client). `--http` runs the shared server.
+    Default: a stdio relay to the shared HTTP server, started on demand — safe
+    with any number of concurrent sessions. `--http` runs the shared server
+    itself. `--direct` is the legacy in-process stdio server; it holds the DB
+    lock, so only one session at a time can use it.
     """
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--http", action="store_true", help="serve MCP over HTTP")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--http", action="store_true", help="run the shared HTTP server")
+    mode.add_argument("--direct", action="store_true", help="legacy single-session stdio server")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, default=int(os.environ.get("SAPIENCE_PORT", 8765)))
     args = parser.parse_args()
     if args.http:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
         http_main(args.host, args.port)
-    else:
+    elif args.direct:
         asyncio.run(main())
+    else:
+        from . import proxy
+        proxy.main()
 
 
 if __name__ == "__main__":

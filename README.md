@@ -103,7 +103,7 @@ With [uv](https://docs.astral.sh/uv/) installed and `OPENAI_API_KEY` + `ANTHROPI
 /plugin install sapience@sapience
 ```
 
-This wires up everything below in one step: the MCP server (launched via `uvx`, no manual install), the `/sapience:log` judgment-ledger command, and a session-stop hook that runs the weekly ledger review (self-gated to once every 6 days). Configuration still comes from your environment — set `MEMORY_USER_CONTEXT`, `LEDGER_DOMAINS`, or `SAPIENCE_DATA_DIR` there if you want non-defaults.
+This wires up everything below in one step: the MCP server (launched via `uvx`, no manual install) and the `/sapience:log` judgment-ledger command. Consolidation and the weekly ledger review run inside the shared server, so there are no hooks or cron jobs to set up. Configuration still comes from your environment — set `MEMORY_USER_CONTEXT`, `LEDGER_DOMAINS`, `SAPIENCE_DATA_DIR`, or `SAPIENCE_PORT` there if you want non-defaults.
 
 ### Wire into Claude Code manually
 
@@ -131,39 +131,18 @@ Or, with the package installed, point directly at the console script / module:
 
 Restart Claude Code. The server reads keys and config at launch — restart after changing either.
 
-### Running several Claude Code sessions at once (recommended setup)
+### How it runs: one shared server, any number of sessions
 
-The stdio configs above start **one server per Claude Code session**. Chroma's on-disk vector index is single-writer: two processes holding the same `chroma_db` each flush their own copy of the index and overwrite each other, and the index silently drifts until a fresh server segfaults on open. Sapience takes an exclusive lock on the DB (`chroma_db.lock`), so a second process now fails fast with `Another sapience process already owns ...` instead of corrupting it — but that means only the first session gets memory.
+Chroma's on-disk vector index is single-writer: two processes holding the same `chroma_db` each flush their own copy of the index and overwrite each other, and the index silently drifts until a server segfaults on open. So Sapience never runs one server per session.
 
-If you keep more than one session open, run a single shared server over HTTP and point every session at it:
+What each Claude Code session launches (`sapience`, `run_server.sh`, or `python -m sapience.server`) is a thin stdio relay. It looks for the shared server on `127.0.0.1:8765` (`SAPIENCE_PORT` to change), starts it in the background if none is up, and forwards the session's MCP traffic to it. The shared server:
 
-```
-run_server.sh --http                 # or: python -m sapience.server --http [--host 127.0.0.1] [--port 8765]
-claude mcp add --transport http -s user sapience http://127.0.0.1:8765/mcp/
-```
+- is the only process that opens the DB, enforced by an exclusive lock (`chroma_db.lock`) — anything else that tries fails fast with `Another sapience process already owns ...` instead of corrupting the index;
+- binds to localhost only and is stateless, so sessions keep working across a server restart — if it dies, the next request from any session restarts it;
+- runs consolidation every 6 hours (`SAPIENCE_CONSOLIDATE_EVERY_S`) and checks whether the weekly ledger review is due every hour;
+- logs to `server.log` in the data directory, and is replaced automatically when a relay from a different installed version connects. Per-project `SAPIENCE_NAMESPACE` still works: each relay applies its own namespace to its calls.
 
-The HTTP server binds to localhost only, is stateless (sessions survive a server restart without reconnecting), and runs consolidation every 6 hours (`SAPIENCE_CONSOLIDATE_EVERY_S`) and the weekly ledger review check hourly in-process — so no hooks or cron jobs touch the DB. On macOS, keep it running with a LaunchAgent at `~/Library/LaunchAgents/com.example.sapience.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>com.example.sapience</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/absolute/path/to/sapience/run_server.sh</string>
-        <string>--http</string>
-    </array>
-    <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><true/>
-    <key>StandardOutPath</key><string>/tmp/sapience.log</string>
-    <key>StandardErrorPath</key><string>/tmp/sapience.log</string>
-</dict>
-</plist>
-```
-
-Load it with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.sapience.plist`. Stop the server before running `python -m sapience.repair --rebuild` — the lock will refuse otherwise.
+Nothing to configure. If you'd rather keep the server under your own supervisor (launchd, systemd), run `sapience --http` there; relays will use it as-is. `sapience --direct` is the old in-process stdio server — single session only, since it holds the lock. Stop the server before `python -m sapience.repair --rebuild`; the lock refuses otherwise.
 
 ### The `/log` command
 
@@ -171,7 +150,7 @@ Load it with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.exampl
 
 ## Automation (optional)
 
-With the shared HTTP server, both jobs run inside the server and need no setup. With a stdio server, use these — but only when no server is running, since each opens the DB and will hit the lock otherwise:
+Both jobs run inside the shared server and need no setup. The scripts remain for one-off manual runs while the server is stopped (each opens the DB and will hit the lock otherwise):
 
 - `run_consolidate.sh` — nightly: extract semantic patterns from recent episodes (cron/launchd).
 - `run_weekly_review.sh` — weekly ledger review; designed for a Claude Code Stop hook.
