@@ -145,6 +145,10 @@ async def list_tools() -> list[types.Tool]:
                         "type": "integer",
                         "description": "How many days of episodic memory to consolidate (default 7)",
                         "default": 7
+                    },
+                    "namespace": {
+                        "type": "string",
+                        "description": "Namespace to consolidate. Omit for this server's namespace; '*' consolidates every namespace."
                     }
                 }
             }
@@ -534,7 +538,8 @@ Be specific. These will be used to develop the user's thinking, not just summari
             return [types.TextContent(type="text", text=json.dumps(output, indent=2))]
 
         elif name == "consolidate":
-            result = consolidator.run(days_back=arguments.get("days_back", 7))
+            result = consolidator.run(days_back=arguments.get("days_back", 7),
+                                      namespace=arguments.get("namespace"))
             return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
 
         elif name == "list_memories":
@@ -778,7 +783,8 @@ async def _background_jobs():
         try:
             if now - last_consolidate >= CONSOLIDATE_EVERY_S:
                 last_consolidate = now
-                result = await asyncio.to_thread(consolidator.run)
+                # Shared server: sessions from every project write here.
+                result = await asyncio.to_thread(consolidator.run, namespace="*")
                 logging.info("consolidate: %s", json.dumps(result)[:500])
             if now - last_review >= WEEKLY_REVIEW_CHECK_EVERY_S:
                 last_review = now
