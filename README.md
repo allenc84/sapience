@@ -131,11 +131,47 @@ Or, with the package installed, point directly at the console script / module:
 
 Restart Claude Code. The server reads keys and config at launch — restart after changing either.
 
+### Running several Claude Code sessions at once (recommended setup)
+
+The stdio configs above start **one server per Claude Code session**. Chroma's on-disk vector index is single-writer: two processes holding the same `chroma_db` each flush their own copy of the index and overwrite each other, and the index silently drifts until a fresh server segfaults on open. Sapience takes an exclusive lock on the DB (`chroma_db.lock`), so a second process now fails fast with `Another sapience process already owns ...` instead of corrupting it — but that means only the first session gets memory.
+
+If you keep more than one session open, run a single shared server over HTTP and point every session at it:
+
+```
+run_server.sh --http                 # or: python -m sapience.server --http [--host 127.0.0.1] [--port 8765]
+claude mcp add --transport http -s user sapience http://127.0.0.1:8765/mcp/
+```
+
+The HTTP server binds to localhost only, is stateless (sessions survive a server restart without reconnecting), and runs consolidation every 6 hours (`SAPIENCE_CONSOLIDATE_EVERY_S`) and the weekly ledger review check hourly in-process — so no hooks or cron jobs touch the DB. On macOS, keep it running with a LaunchAgent at `~/Library/LaunchAgents/com.example.sapience.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.example.sapience</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/absolute/path/to/sapience/run_server.sh</string>
+        <string>--http</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>StandardOutPath</key><string>/tmp/sapience.log</string>
+    <key>StandardErrorPath</key><string>/tmp/sapience.log</string>
+</dict>
+</plist>
+```
+
+Load it with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.sapience.plist`. Stop the server before running `python -m sapience.repair --rebuild` — the lock will refuse otherwise.
+
 ### The `/log` command
 
 `.claude/commands/log.md` provides a `/log` slash command for the ledger — logging, reviewing, resolving, and generating calibrations/bias maps in natural language. Copy it into your project's `.claude/commands/`.
 
 ## Automation (optional)
+
+With the shared HTTP server, both jobs run inside the server and need no setup. With a stdio server, use these — but only when no server is running, since each opens the DB and will hit the lock otherwise:
 
 - `run_consolidate.sh` — nightly: extract semantic patterns from recent episodes (cron/launchd).
 - `run_weekly_review.sh` — weekly ledger review; designed for a Claude Code Stop hook.

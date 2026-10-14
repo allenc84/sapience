@@ -67,7 +67,42 @@ def _combine_where(*clauses: dict | None) -> dict | None:
     return {"$and": present}
 
 
+_lock_fd = None
+
+
+def acquire_db_lock() -> None:
+    """Take an exclusive, process-lifetime lock on the Chroma directory.
+
+    Chroma's persisted HNSW index is single-writer: two processes holding the
+    same directory each flush their own in-memory index and overwrite each
+    other, which is how the DB was corrupted on 2026-07-18, 2026-09-11 and
+    2026-10-13. Every process that opens the collection takes this lock first;
+    a second one fails fast instead of silently corrupting the index. The OS
+    releases the lock when the process exits, even on a crash.
+    """
+    global _lock_fd
+    if _lock_fd is not None:
+        return
+    import fcntl
+    fd = open(DB_PATH.parent / f"{DB_PATH.name}.lock", "a+")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        fd.close()
+        raise RuntimeError(
+            f"Another sapience process already owns {DB_PATH}. Use the shared "
+            f"HTTP server (python -m sapience.server --http) instead of opening "
+            f"the DB directly."
+        )
+    fd.seek(0)
+    fd.truncate()
+    fd.write(f"{os.getpid()}\n")
+    fd.flush()
+    _lock_fd = fd
+
+
 def _get_collection() -> chromadb.Collection:
+    acquire_db_lock()
     client = chromadb.PersistentClient(
         path=str(DB_PATH),
         settings=Settings(anonymized_telemetry=False)
