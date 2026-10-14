@@ -12,4 +12,4 @@ ps -eo ppid,pid | awk 'NR>1 && $1==1 {print $2}' | while read pid; do
     [[ "$cmd" == *"sapience.server"* ]] && kill "$pid" 2>/dev/null
 done
 cd "$DIR"
-exec "$DIR/venv/bin/python" -m sapience.server
+exec "$DIR/venv/bin/python" -m sapience.server "$@"

@@ -35,6 +35,8 @@ BATCH = 100
 
 
 def _open(path: Path) -> chromadb.Collection:
+    from .memory_store import acquire_db_lock
+    acquire_db_lock()
     client = chromadb.PersistentClient(
         path=str(path), settings=Settings(anonymized_telemetry=False)
     )

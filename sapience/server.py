@@ -4,6 +4,8 @@ MCP server — Claude Code calls these tools instead of reading flat markdown fi
 
 import asyncio
 import json
+import logging
+import os
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -756,9 +758,81 @@ async def main():
         await app.run(read_stream, write_stream, app.create_initialization_options())
 
 
+CONSOLIDATE_EVERY_S = int(os.environ.get("SAPIENCE_CONSOLIDATE_EVERY_S", 6 * 3600))
+WEEKLY_REVIEW_CHECK_EVERY_S = 3600
+
+
+async def _background_jobs():
+    """Run consolidation and the weekly ledger review inside the server.
+
+    These used to run as separate processes from a Claude Code Stop hook after
+    every response, each opening the Chroma DB alongside the live server —
+    a second writer. Running them here keeps the server the only process
+    touching the DB.
+    """
+    from . import weekly_review
+    last_consolidate = last_review = float("-inf")
+    while True:
+        await asyncio.sleep(60)
+        now = asyncio.get_running_loop().time()
+        try:
+            if now - last_consolidate >= CONSOLIDATE_EVERY_S:
+                last_consolidate = now
+                result = await asyncio.to_thread(consolidator.run)
+                logging.info("consolidate: %s", json.dumps(result)[:500])
+            if now - last_review >= WEEKLY_REVIEW_CHECK_EVERY_S:
+                last_review = now
+                result = await asyncio.to_thread(weekly_review.run)
+                if result.get("status") != "skipped":
+                    logging.info("weekly_review: %s", json.dumps(result)[:500])
+        except Exception:
+            logging.exception("background job failed")
+
+
+def http_main(host: str, port: int):
+    """Serve MCP over streamable HTTP so every Claude Code tab shares this one
+    process (and therefore one Chroma writer)."""
+    import contextlib
+    import uvicorn
+    from starlette.applications import Starlette
+    from starlette.routing import Mount
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
+    memory_store.acquire_db_lock()
+    # Stateless: no per-session state, so tabs survive a server restart
+    # without reconnecting.
+    manager = StreamableHTTPSessionManager(app=app, stateless=True)
+
+    async def handle(scope, receive, send):
+        await manager.handle_request(scope, receive, send)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_):
+        jobs = asyncio.create_task(_background_jobs())
+        async with manager.run():
+            yield
+        jobs.cancel()
+
+    starlette_app = Starlette(routes=[Mount("/mcp", app=handle)], lifespan=lifespan)
+    uvicorn.run(starlette_app, host=host, port=port, log_level="warning")
+
+
 def cli():
-    """Console-script entry point (`sapience`) and `python -m sapience.server`."""
-    asyncio.run(main())
+    """Console-script entry point (`sapience`) and `python -m sapience.server`.
+
+    Default is stdio (one server per client). `--http` runs the shared server.
+    """
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--http", action="store_true", help="serve MCP over HTTP")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8765)
+    args = parser.parse_args()
+    if args.http:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+        http_main(args.host, args.port)
+    else:
+        asyncio.run(main())
 
 
 if __name__ == "__main__":
